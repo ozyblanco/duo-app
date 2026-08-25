@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { 
   Users, 
   Link as LinkIcon, 
@@ -11,14 +11,14 @@ import {
   Loader2,
   AlertCircle
 } from 'lucide-react';
+import { supabase } from '../../lib/supabase'; // Ajusta la ruta a tu cliente de Supabase si varía
 
 interface PartnerConnectViewProps {
   onComplete: (partnerData: { partnerName: string; pairCode: string }) => void;
 }
 
-// Generador de código único de 6 caracteres alfanuméricos
 const generatePairCode = () => {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // Omite caracteres ambiguos (0/O, 1/I)
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let result = '';
   for (let i = 0; i < 6; i++) {
     result += chars.charAt(Math.floor(Math.random() * chars.length));
@@ -30,37 +30,94 @@ export function PartnerConnectView({ onComplete }: PartnerConnectViewProps) {
   const [step, setStep] = useState<'select' | 'create' | 'join' | 'success'>('select');
   const [myCode, setMyCode] = useState('');
   const [inputCode, setInputCode] = useState('');
+  const [coupleId, setCoupleId] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [connectedPartner, setConnectedPartner] = useState('Tu Pareja');
 
-  // Generar código único al elegir "Crear Espacio"
-  const handleSelectCreate = () => {
-    setMyCode(generatePairCode());
-    setStep('create');
+  // 1. Crear Espacio en Supabase
+  const handleSelectCreate = async () => {
+    setLoading(true);
+    setError(null);
+    const code = generatePairCode();
+    setMyCode(code);
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Usuario no autenticado.');
+
+      // Crear pareja en tabla couples
+      const { data: couple, error: coupleErr } = await supabase
+        .from('couples')
+        .insert({ pair_code: code })
+        .select()
+        .single();
+
+      if (coupleErr) throw coupleErr;
+
+      // Vincular el couple_id al perfil del creador
+      const { error: profileErr } = await supabase
+        .from('profiles')
+        .update({ couple_id: couple.id })
+        .eq('id', user.id);
+
+      if (profileErr) throw profileErr;
+
+      setCoupleId(couple.id);
+      setStep('create');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Error al crear el espacio.';
+      setError(msg);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  // Copiar código al portapapeles
-  const handleCopyCode = () => {
-    navigator.clipboard.writeText(myCode);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
+  // 2. Escuchar en Tiempo Real cuando la pareja ingrese el código
+  useEffect(() => {
+    if (step !== 'create' || !coupleId) return;
 
-  // Compartir por WhatsApp
-  const handleShareWhatsApp = () => {
-    const text = encodeURIComponent(
-      `¡Hola! Únete a mi espacio en DUO para gestionar nuestras finanzas juntos 💗. Mi código de invitación es: ${myCode}`
-    );
-    window.open(`https://wa.me/?text=${text}`, '_blank');
-  };
+    const checkPartnerJoined = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
 
-  // Unirse mediante código de pareja
-  const handleJoinWithCode = (e: React.FormEvent) => {
+      const { data } = await supabase
+        .from('profiles')
+        .select('full_name')
+        .eq('couple_id', coupleId)
+        .neq('id', user.id)
+        .maybeSingle();
+
+      if (data) {
+        setConnectedPartner(data.full_name || 'Tu Pareja');
+        setStep('success');
+      }
+    };
+
+    // Consulta periódica (Polling fallback) cada 2.5 segundos
+    const interval = setInterval(checkPartnerJoined, 2500);
+
+    // Suscripción Realtime
+    const channel = supabase
+      .channel(`couple-join-${coupleId}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'profiles', filter: `couple_id=eq.${coupleId}` },
+        () => checkPartnerJoined()
+      )
+      .subscribe();
+
+    return () => {
+      clearInterval(interval);
+      supabase.removeChannel(channel);
+    };
+  }, [step, coupleId]);
+
+  // 3. Unirse mediante código ingresado
+  const handleJoinWithCode = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-
     const formattedInput = inputCode.trim().toUpperCase();
 
     if (!formattedInput) {
@@ -68,32 +125,62 @@ export function PartnerConnectView({ onComplete }: PartnerConnectViewProps) {
       return;
     }
 
-    if (formattedInput.length < 6) {
-      setError('El código debe tener al menos 6 caracteres.');
-      return;
+    setLoading(true);
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Usuario no autenticado.');
+
+      // Buscar el código en couples
+      const { data: couple, error: coupleErr } = await supabase
+        .from('couples')
+        .select('id')
+        .eq('pair_code', formattedInput)
+        .single();
+
+      if (coupleErr || !couple) {
+        throw new Error('El código ingresado no existe o es incorrecto.');
+      }
+
+      // Actualizar el perfil actual con el couple_id
+      const { error: updateErr } = await supabase
+        .from('profiles')
+        .update({ couple_id: couple.id })
+        .eq('id', user.id);
+
+      if (updateErr) throw updateErr;
+
+      // Obtener el nombre de la pareja (el creador)
+      const { data: partnerProfile } = await supabase
+        .from('profiles')
+        .select('full_name')
+        .eq('couple_id', couple.id)
+        .neq('id', user.id)
+        .maybeSingle();
+
+      setConnectedPartner(partnerProfile?.full_name || 'Tu Pareja');
+      setStep('success');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'No se pudo vincular la cuenta.';
+      setError(msg);
+    } finally {
+      setLoading(false);
     }
-
-    setLoading(true);
-
-    // Simulación de validación de código
-    setTimeout(() => {
-      setLoading(false);
-      setConnectedPartner('Camila'); // Nombre simulado de la pareja
-      setStep('success');
-    }, 1000);
   };
 
-  // Simular que la pareja ingresó nuestro código (Para pruebas)
-  const handleSimulatePartnerJoin = () => {
-    setLoading(true);
-    setTimeout(() => {
-      setLoading(false);
-      setConnectedPartner('Camila');
-      setStep('success');
-    }, 800);
+  const handleCopyCode = () => {
+    navigator.clipboard.writeText(myCode);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   };
 
-  // Finalizar e ir al Dashboard
+  const handleShareWhatsApp = () => {
+    const text = encodeURIComponent(
+      `¡Hola! Únete a mi espacio en DUO para gestionar nuestras finanzas juntos 💗. Mi código de invitación es: ${myCode}`
+    );
+    window.open(`https://wa.me/?text=${text}`, '_blank');
+  };
+
   const handleFinish = () => {
     onComplete({
       partnerName: connectedPartner,
@@ -105,7 +192,6 @@ export function PartnerConnectView({ onComplete }: PartnerConnectViewProps) {
     <div className="h-screen w-full flex bg-slate-50 dark:bg-[#0D1117] text-slate-900 dark:text-slate-100 font-sans overflow-hidden items-center justify-center p-4">
       <div className="w-full max-w-md bg-white dark:bg-[#161B22] border border-slate-200/80 dark:border-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl relative overflow-hidden">
         
-        {/* Cabecera / Logo */}
         <div className="flex items-center justify-between mb-6">
           <img
             src="/logos/duologoconisotipo.png"
@@ -117,7 +203,14 @@ export function PartnerConnectView({ onComplete }: PartnerConnectViewProps) {
           </span>
         </div>
 
-        {/* ──────── PASO 1: SELECCIÓN DE MODO ──────── */}
+        {error && (
+          <div className="mb-4 p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 flex items-center gap-2 text-xs text-rose-600 dark:text-rose-400 font-medium">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span>{error}</span>
+          </div>
+        )}
+
+        {/* PASO 1: SELECCIÓN */}
         {step === 'select' && (
           <div className="space-y-6 animate-in fade-in duration-300">
             <div>
@@ -130,14 +223,14 @@ export function PartnerConnectView({ onComplete }: PartnerConnectViewProps) {
             </div>
 
             <div className="space-y-3">
-              {/* Opción A: Crear Espacio */}
               <button
                 type="button"
                 onClick={handleSelectCreate}
-                className="w-full p-4 rounded-2xl border-2 border-slate-200/80 dark:border-slate-800 hover:border-blue-500 dark:hover:border-blue-500 bg-slate-50/50 dark:bg-[#0D1117]/50 hover:bg-blue-50/30 dark:hover:bg-blue-950/20 text-left transition-all cursor-pointer group flex items-start gap-3.5"
+                disabled={loading}
+                className="w-full p-4 rounded-2xl border-2 border-slate-200/80 dark:border-slate-800 hover:border-blue-500 dark:hover:border-blue-500 bg-slate-50/50 dark:bg-[#0D1117]/50 hover:bg-blue-50/30 dark:hover:bg-blue-950/20 text-left transition-all cursor-pointer group flex items-start gap-3.5 disabled:opacity-50"
               >
                 <div className="w-10 h-10 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform">
-                  <Users className="w-5 h-5" />
+                  {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Users className="w-5 h-5" />}
                 </div>
                 <div>
                   <h3 className="text-xs font-bold text-slate-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
@@ -149,7 +242,6 @@ export function PartnerConnectView({ onComplete }: PartnerConnectViewProps) {
                 </div>
               </button>
 
-              {/* Opción B: Tengo Código */}
               <button
                 type="button"
                 onClick={() => setStep('join')}
@@ -171,7 +263,7 @@ export function PartnerConnectView({ onComplete }: PartnerConnectViewProps) {
           </div>
         )}
 
-        {/* ──────── PASO 2A: CÓDIGO GENERADO (CREAR) ──────── */}
+        {/* PASO 2A: CÓDIGO GENERADO */}
         {step === 'create' && (
           <div className="space-y-5 animate-in fade-in duration-300">
             <div>
@@ -183,7 +275,6 @@ export function PartnerConnectView({ onComplete }: PartnerConnectViewProps) {
               </p>
             </div>
 
-            {/* Caja del Código */}
             <div className="p-4 rounded-2xl bg-gradient-to-r from-blue-500/10 via-indigo-500/10 to-pink-500/10 border border-indigo-500/20 text-center space-y-2">
               <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest block">
                 CÓDIGO ÚNICO
@@ -193,7 +284,6 @@ export function PartnerConnectView({ onComplete }: PartnerConnectViewProps) {
               </div>
             </div>
 
-            {/* Botones de Acción */}
             <div className="grid grid-cols-2 gap-2.5">
               <button
                 type="button"
@@ -214,21 +304,11 @@ export function PartnerConnectView({ onComplete }: PartnerConnectViewProps) {
               </button>
             </div>
 
-            {/* Estado de Espera / Simulación */}
             <div className="pt-2 border-t border-slate-100 dark:border-slate-800 text-center space-y-3">
               <div className="flex items-center justify-center gap-2 text-xs text-slate-500 dark:text-slate-400 font-medium">
                 <Loader2 className="w-4 h-4 animate-spin text-indigo-500" />
                 <span>Esperando a que tu pareja ingrese el código...</span>
               </div>
-
-              {/* Botón interactivo de prueba */}
-              <button
-                type="button"
-                onClick={handleSimulatePartnerJoin}
-                className="text-[11px] text-indigo-600 dark:text-indigo-400 font-bold hover:underline cursor-pointer"
-              >
-                ⚡ Simular que mi pareja se conectó
-              </button>
             </div>
 
             <button
@@ -241,7 +321,7 @@ export function PartnerConnectView({ onComplete }: PartnerConnectViewProps) {
           </div>
         )}
 
-        {/* ──────── PASO 2B: INGRESAR CÓDIGO (UNIRSE) ──────── */}
+        {/* PASO 2B: INGRESAR CÓDIGO */}
         {step === 'join' && (
           <div className="space-y-5 animate-in fade-in duration-300">
             <div>
@@ -252,13 +332,6 @@ export function PartnerConnectView({ onComplete }: PartnerConnectViewProps) {
                 Escribe el código que te compartió tu pareja.
               </p>
             </div>
-
-            {error && (
-              <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 flex items-center gap-2 text-xs text-rose-600 dark:text-rose-400 font-medium">
-                <AlertCircle className="w-4 h-4 shrink-0" />
-                <span>{error}</span>
-              </div>
-            )}
 
             <form onSubmit={handleJoinWithCode} className="space-y-4">
               <div className="space-y-1">
@@ -305,7 +378,7 @@ export function PartnerConnectView({ onComplete }: PartnerConnectViewProps) {
           </div>
         )}
 
-        {/* ──────── PASO 3: ÉXITO Y MATCH 🎉 ──────── */}
+        {/* PASO 3: ÉXITO */}
         {step === 'success' && (
           <div className="text-center space-y-5 animate-in zoom-in-95 duration-300 py-2">
             <div className="relative w-20 h-20 mx-auto flex items-center justify-center">
