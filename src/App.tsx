@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { Loader2 } from 'lucide-react';
-import { supabase } from './lib/supabase'; // Ajusta la ruta a tu cliente de Supabase si varía
+import { supabase } from './lib/supabase';
 import { useAuth } from './hooks/useAuth';
 import { useTransactions } from './hooks/useTransactions';
+import { useCoupleProfiles } from './hooks/useCoupleProfiles';
 import { AppLayout } from './components/layout/AppLayout';
 import { BalanceOverview } from './components/dashboard/BalanceOverview';
 import { MonthlyAnalytics } from './components/dashboard/MonthlyAnalytics';
@@ -19,14 +20,13 @@ import { SettingsView } from './components/settings/SettingsView';
 import { RatesWidget } from './components/currency/RatesWidget';
 import { AuthView } from './components/auth/AuthView';
 import { PartnerConnectView } from './components/auth/PartnerConnectView';
-import { currentUser } from './data/mockData';
 import type { SplitRatio } from './types';
 
 export default function App() {
   const { user, loading: authLoading } = useAuth();
   const { transactions, addTransaction } = useTransactions();
+  const { currentUser, loading: profilesLoading } = useCoupleProfiles();
   
-  // Estado para verificar si existe vínculo de pareja en la BD
   const [isPartnerConnected, setIsPartnerConnected] = useState(false);
   const [checkingPartner, setCheckingPartner] = useState(true);
 
@@ -34,7 +34,6 @@ export default function App() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSettleModalOpen, setIsSettleModalOpen] = useState(false);
 
-  // Consultar en Supabase si el perfil ya posee un couple_id asignado
   useEffect(() => {
     async function checkPartnerStatus() {
       if (!user) {
@@ -66,18 +65,20 @@ export default function App() {
     checkPartnerStatus();
   }, [user]);
 
-  // Totales generales
+  const currentUserId = currentUser?.id || user?.id || '';
+
   const totalJointSpent = transactions.reduce((acc, curr) => acc + curr.amount, 0);
+  
   const userPaidTotal = transactions
-    .filter((tx) => tx.paidByUserId === currentUser.id)
+    .filter((tx) => tx.paidByUserId === currentUserId)
     .reduce((acc, curr) => acc + curr.amount, 0);
+
   const partnerPaidTotal = totalJointSpent - userPaidTotal;
 
-  // Cálculo de Balance Neto de Deudas entre la pareja
   const netBalance = transactions.reduce((acc, tx) => {
     if (tx.categoryId === 'Liquidación') return acc;
 
-    const isUserPayer = tx.paidByUserId === currentUser.id;
+    const isUserPayer = tx.paidByUserId === currentUserId;
     const split = tx.splitRatio || { userA: 50, userB: 50 };
 
     if (isUserPayer) {
@@ -87,7 +88,6 @@ export default function App() {
     }
   }, 0);
 
-  // Registrar Gasto con Fecha y Hora exacta
   const handleAddTransaction = (data: {
     title: string;
     amount: number;
@@ -104,7 +104,7 @@ export default function App() {
       currency: data.currency || 'USD',
       type: 'expense',
       ownership: 'joint',
-      paidByUserId: data.paidByUserId,
+      paidByUserId: data.paidByUserId || currentUserId,
       categoryId: data.category,
       accountId: data.accountId || 'acc_1',
       splitRatio: data.splitRatio || { userA: 50, userB: 50 },
@@ -112,7 +112,6 @@ export default function App() {
     });
   };
 
-  // Registrar Liquidación ("Saldar Cuentas")
   const handleSettleUp = (settlementData: {
     title: string;
     amount: number;
@@ -126,7 +125,7 @@ export default function App() {
       currency: 'USD',
       type: 'expense',
       ownership: 'joint',
-      paidByUserId: settlementData.paidByUserId,
+      paidByUserId: settlementData.paidByUserId || currentUserId,
       categoryId: settlementData.category,
       accountId: 'acc_1',
       splitRatio: { userA: 50, userB: 50 },
@@ -134,8 +133,7 @@ export default function App() {
     });
   };
 
-  // PANTALLA DE CARGA: Mientras valida auth y consulta la tabla profiles
-  if (authLoading || (user && checkingPartner)) {
+  if (authLoading || (user && (checkingPartner || profilesLoading))) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-[#0D1117]">
         <div className="flex items-center gap-2.5 text-slate-600 dark:text-slate-400">
@@ -146,12 +144,10 @@ export default function App() {
     );
   }
 
-  // PASO 1: Si no hay usuario autenticado en Supabase
   if (!user) {
     return <AuthView />;
   }
 
-  // PASO 2: Si está autenticado pero no tiene un couple_id en la base de datos
   if (!isPartnerConnected) {
     return (
       <PartnerConnectView 
@@ -160,7 +156,6 @@ export default function App() {
     );
   }
 
-  // PASO 3: Vista principal del Dashboard cuando el usuario ya se autenticó y vinculó
   return (
     <AppLayout 
       activeTab={activeTab} 
@@ -179,9 +174,14 @@ export default function App() {
             totalJointSpent={totalJointSpent}
             userPaidTotal={userPaidTotal}
             partnerPaidTotal={partnerPaidTotal}
+            netBalance={netBalance}
           />
           <RatesWidget />
-          <TransactionList transactions={transactions} />
+          <TransactionList 
+            transactions={transactions} 
+            onViewAll={() => setActiveTab('transactions')}
+            onNewTransaction={() => setIsModalOpen(true)}
+          />
           <MonthlyAnalytics />
         </div>
       )}
@@ -203,19 +203,18 @@ export default function App() {
 
       {activeTab === 'settings' && <SettingsView />}
 
-      {/* Modal Nuevo Gasto */}
       <NewTransactionModal 
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
         onSubmit={handleAddTransaction}
       />
 
-      {/* Modal Saldar Cuentas */}
+      {/* Aquí el error desaparecerá al arreglar la interfaz en SettleUpModal.tsx */}
       <SettleUpModal
         isOpen={isSettleModalOpen}
         onClose={() => setIsSettleModalOpen(false)}
         netBalance={netBalance}
-        onSettle={handleSettleUp}
+        onSubmit={handleSettleUp}
       />
     </AppLayout>
   );

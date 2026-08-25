@@ -23,9 +23,9 @@ export function MonthEndBanner({ netBalance, onOpenSettleModal }: MonthEndBanner
 
       <button
         onClick={onOpenSettleModal}
-        className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 transition-all active:scale-95 shrink-0 cursor-pointer"
+        className="px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors shrink-0 cursor-pointer"
       >
-        <span>Saldar Ahora</span>
+        <span>Saldar Cuentas</span>
         <ArrowRight className="w-3.5 h-3.5" />
       </button>
     </div>

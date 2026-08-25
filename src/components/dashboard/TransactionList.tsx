@@ -8,7 +8,7 @@ import {
   Receipt
 } from 'lucide-react';
 import type { Transaction } from '@/types';
-import { currentUser, partnerUser } from '@/data/mockData';
+import { useCoupleProfiles } from '@/hooks/useCoupleProfiles';
 
 interface TransactionListProps {
   transactions: Transaction[];
@@ -17,12 +17,15 @@ interface TransactionListProps {
 }
 
 export function TransactionList({ transactions, onViewAll, onNewTransaction }: TransactionListProps) {
+  // CORRECCIÓN: Se extrae 'partner' correctamente del hook
+  const { currentUser, partner } = useCoupleProfiles();
+
   const getCategoryIcon = (title: string) => {
     const lower = title.toLowerCase();
-    if (lower.includes('transferencia')) {
+    if (lower.includes('transferencia') || lower.includes('liquidación')) {
       return <ArrowLeftRight className="w-4 h-4 text-emerald-500" />;
     }
-    if (lower.includes('supermercado') || lower.includes('comida')) {
+    if (lower.includes('supermercado') || lower.includes('comida') || lower.includes('mercado')) {
       return <ShoppingBag className="w-4 h-4 text-rose-500" />;
     }
     if (lower.includes('internet') || lower.includes('luz') || lower.includes('servicio')) {
@@ -40,7 +43,6 @@ export function TransactionList({ transactions, onViewAll, onNewTransaction }: T
     return `${splitRatio.userA} / ${splitRatio.userB}`;
   };
 
-  // Si no hay transacciones, muestra el estado en cero adaptado a la interfaz
   if (transactions.length === 0) {
     return (
       <div className="bg-white dark:bg-[#161B22] border border-slate-200/80 dark:border-slate-800/60 rounded-2xl p-6 lg:p-8 text-center shadow-xs">
@@ -51,7 +53,7 @@ export function TransactionList({ transactions, onViewAll, onNewTransaction }: T
           Sin movimientos registrados
         </h3>
         <p className="text-xs text-slate-500 dark:text-slate-400 max-w-xs mx-auto leading-relaxed mb-4">
-          Aún no han registrado ningún gasto o ingreso juntos. Registren el primero para comenzar a sincronizar sus finanzas.
+          Aún no han registrado ningún gasto juntos. Registren el primero para comenzar a synchronizar sus finanzas.
         </p>
         {onNewTransaction && (
           <button
@@ -68,29 +70,34 @@ export function TransactionList({ transactions, onViewAll, onNewTransaction }: T
   return (
     <div className="bg-white dark:bg-[#161B22] border border-slate-200/80 dark:border-slate-800/60 rounded-2xl p-5 lg:p-6 shadow-xs hover:border-slate-300 dark:hover:border-slate-700/80 transition-all">
       <div className="flex items-center justify-between mb-4">
-        <div>
-          <h2 className="text-base font-bold text-slate-900 dark:text-white tracking-tight">
-            Movimientos Recientes
-          </h2>
-        </div>
-        <button 
-          onClick={onViewAll}
-          className="text-xs font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 flex items-center gap-0.5 transition-colors"
-        >
-          <span>Ver todos</span>
-          <ChevronRight className="w-3.5 h-3.5" />
-        </button>
+        <h2 className="text-base font-bold text-slate-900 dark:text-white tracking-tight">
+          Movimientos Recientes
+        </h2>
+        {onViewAll && (
+          <button 
+            onClick={onViewAll}
+            className="text-xs font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 flex items-center gap-0.5 transition-colors cursor-pointer"
+          >
+            <span>Ver todos</span>
+            <ChevronRight className="w-3.5 h-3.5" />
+          </button>
+        )}
       </div>
 
       <div className="space-y-2.5">
         {transactions.map((tx) => {
           const displayAmount = Math.abs(tx.amount);
-          const paidByName = tx.paidByUserId === currentUser.id ? currentUser.name : partnerUser.name;
+          const isUser = tx.paidByUserId === currentUser?.id;
+          
+          // CORRECCIÓN: Se utiliza 'partner'
+          const paidByName = isUser 
+            ? (currentUser?.name || 'Tú') 
+            : (partner?.name || 'Pareja');
 
           return (
             <div
               key={tx.id}
-              className="flex items-center justify-between p-3.5 rounded-xl bg-slate-50/80 dark:bg-[#0B0F17]/40 border border-slate-200/50 dark:border-slate-800/40 hover:border-slate-300 dark:hover:border-slate-700/60 transition-all group cursor-pointer"
+              className="flex items-center justify-between p-3.5 rounded-xl bg-slate-50/80 dark:bg-[#0B0F17]/40 border border-slate-200/50 dark:border-slate-800/40 hover:border-slate-300 dark:hover:border-slate-700/60 transition-all group"
             >
               <div className="flex items-center gap-3.5 min-w-0">
                 <div className="p-2.5 rounded-xl bg-white dark:bg-[#161B22] border border-slate-200/60 dark:border-slate-800 text-slate-600 dark:text-slate-300 shrink-0 group-hover:scale-105 transition-transform shadow-2xs">

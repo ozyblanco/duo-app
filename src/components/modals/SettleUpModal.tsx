@@ -1,12 +1,12 @@
 import { X, CheckCircle2, ArrowRight } from 'lucide-react';
-import { currentUser, partnerUser } from '@/data/mockData';
 import { useLiveClock } from '@/hooks/useLiveClock';
+import { useCoupleProfiles } from '@/hooks/useCoupleProfiles';
 
 interface SettleUpModalProps {
   isOpen: boolean;
   onClose: () => void;
   netBalance: number; // Positivo: currentUser debe recibir. Negativo: currentUser debe pagar.
-  onSettle: (settlementTx: {
+  onSubmit: (settlementTx: {
     title: string;
     amount: number;
     paidByUserId: string;
@@ -15,22 +15,29 @@ interface SettleUpModalProps {
   }) => void;
 }
 
-export function SettleUpModal({ isOpen, onClose, netBalance, onSettle }: SettleUpModalProps) {
+export function SettleUpModal({ isOpen, onClose, netBalance, onSubmit }: SettleUpModalProps) {
   const { formattedIso, dateString, timeString } = useLiveClock();
+  const { currentUser, partner } = useCoupleProfiles();
 
   if (!isOpen) return null;
 
-  const absoluteAmount = Math.abs(netBalance);
-  const isUserDebtor = netBalance < 0; // currentUser le debe a partnerUser
+  const userObj = currentUser || { id: 'user-id', name: 'Tú' };
+  const partnerObj = partner || { id: 'partner-id', name: 'Pareja' };
 
-  const debtor = isUserDebtor ? currentUser : partnerUser;
-  const creditor = isUserDebtor ? partnerUser : currentUser;
+  const absoluteAmount = Math.abs(netBalance);
+  const isUserDebtor = netBalance < 0; // currentUser le debe a partner
+
+  const debtor = isUserDebtor ? userObj : partnerObj;
+  const creditor = isUserDebtor ? partnerObj : userObj;
+
+  const debtorFirstName = debtor.name.split(' ')[0] || debtor.name;
+  const creditorFirstName = creditor.name.split(' ')[0] || creditor.name;
 
   const handleConfirm = () => {
     if (absoluteAmount === 0) return;
 
-    onSettle({
-      title: `Saldar Cuentas - Pago a ${creditor.name.split(' ')[0]}`,
+    onSubmit({
+      title: `Saldar Cuentas - Pago a ${creditorFirstName}`,
       amount: absoluteAmount,
       paidByUserId: debtor.id, // Quién realiza el pago para saldar
       category: 'Liquidación',
@@ -88,10 +95,10 @@ export function SettleUpModal({ isOpen, onClose, netBalance, onSettle }: SettleU
                 <div className="flex items-center justify-between pt-1">
                   <div className="flex items-center gap-2">
                     <div className="w-8 h-8 rounded-full bg-slate-200 dark:bg-slate-800 flex items-center justify-center font-bold text-xs text-slate-700 dark:text-slate-200">
-                      {debtor.name[0]}
+                      {debtor.name[0]?.toUpperCase() || 'U'}
                     </div>
                     <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                      {debtor.name.split(' ')[0]}
+                      {debtorFirstName}
                     </span>
                   </div>
 
@@ -99,10 +106,10 @@ export function SettleUpModal({ isOpen, onClose, netBalance, onSettle }: SettleU
 
                   <div className="flex items-center gap-2">
                     <div className="w-8 h-8 rounded-full bg-slate-200 dark:bg-slate-800 flex items-center justify-center font-bold text-xs text-slate-700 dark:text-slate-200">
-                      {creditor.name[0]}
+                      {creditor.name[0]?.toUpperCase() || 'P'}
                     </div>
                     <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                      {creditor.name.split(' ')[0]}
+                      {creditorFirstName}
                     </span>
                   </div>
                 </div>

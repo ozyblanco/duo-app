@@ -15,7 +15,8 @@ import {
   Calendar
 } from 'lucide-react';
 import type { Transaction } from '@/types';
-import { currentUser, partnerUser, mockCategories } from '@/data/mockData';
+import { useCoupleProfiles } from '@/hooks/useCoupleProfiles';
+import { mockCategories } from '@/data/mockData';
 
 interface TransactionsViewProps {
   transactions: Transaction[];
@@ -23,6 +24,8 @@ interface TransactionsViewProps {
 }
 
 export function TransactionsView({ transactions, onNewTransaction }: TransactionsViewProps) {
+  const { currentUser, partner } = useCoupleProfiles();
+
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedPayer, setSelectedPayer] = useState<'all' | string>('all');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
@@ -32,7 +35,6 @@ export function TransactionsView({ transactions, onNewTransaction }: Transaction
   const [endDate, setEndDate] = useState<string>('');
   const [txType, setTxType] = useState<'all' | 'expenses' | 'settlements'>('all');
 
-  // Obtener nombre formateado de categoría
   const getCategoryName = (tx: Transaction) => {
     const catVal = tx.categoryId || tx.category;
     if (!catVal) return 'Sin categoría';
@@ -112,9 +114,11 @@ export function TransactionsView({ transactions, onNewTransaction }: Transaction
     startDate !== '' ||
     endDate !== '';
 
+  const currentUserName = currentUser?.name || 'Tú';
+  const partnerName = partner?.name || 'Pareja';
+
   return (
     <div className="space-y-6 pb-12">
-      {/* Encabezado */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-xl font-bold text-slate-900 dark:text-white tracking-tight flex items-center gap-2">
@@ -135,11 +139,8 @@ export function TransactionsView({ transactions, onNewTransaction }: Transaction
         </button>
       </div>
 
-      {/* Controles de Filtro Avanzados */}
       <div className="p-4 rounded-2xl bg-white dark:bg-[#161B22] border border-slate-200/80 dark:border-slate-800 space-y-3.5 shadow-xs">
-        {/* Fila 1: Buscador y Selectores principales */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-          {/* Buscador */}
           <div className="relative">
             <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
             <input
@@ -159,7 +160,6 @@ export function TransactionsView({ transactions, onNewTransaction }: Transaction
             )}
           </div>
 
-          {/* Selector de Categoría */}
           <div>
             <select
               value={selectedCategory}
@@ -176,7 +176,6 @@ export function TransactionsView({ transactions, onNewTransaction }: Transaction
             </select>
           </div>
 
-          {/* Rango de Fechas (Con icono de Calendar) */}
           <div className="relative">
             <Calendar className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
             <select
@@ -191,7 +190,6 @@ export function TransactionsView({ transactions, onNewTransaction }: Transaction
             </select>
           </div>
 
-          {/* Ordenar */}
           <button
             onClick={() => setSortBy(sortBy === 'date' ? 'amount' : 'date')}
             className="flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all cursor-pointer"
@@ -201,7 +199,6 @@ export function TransactionsView({ transactions, onNewTransaction }: Transaction
           </button>
         </div>
 
-        {/* Inputs adicionales si el usuario selecciona "Rango personalizado" */}
         {dateRange === 'custom' && (
           <div className="flex items-center gap-3 pt-2">
             <div className="flex-1">
@@ -225,9 +222,7 @@ export function TransactionsView({ transactions, onNewTransaction }: Transaction
           </div>
         )}
 
-        {/* Fila 2: Chips de Pagador y Tipo de Transacción */}
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pt-3 border-t border-slate-100 dark:border-slate-800/80">
-          {/* Pagador */}
           <div className="flex items-center gap-1.5 flex-wrap">
             <span className="text-[11px] font-semibold text-slate-400 mr-1 flex items-center gap-1">
               <User className="w-3 h-3" /> Pagó:
@@ -242,35 +237,38 @@ export function TransactionsView({ transactions, onNewTransaction }: Transaction
             >
               Ambos
             </button>
-            <button
-              onClick={() => setSelectedPayer(currentUser.id)}
-              className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
-                selectedPayer === currentUser.id
-                  ? 'bg-blue-600 text-white shadow-xs'
-                  : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200'
-              }`}
-            >
-              <div className="h-4 w-4 rounded-full bg-blue-400 text-[9px] flex items-center justify-center text-white font-bold">
-                {currentUser.name[0]}
-              </div>
-              <span>{currentUser.name.split(' ')[0]}</span>
-            </button>
-            <button
-              onClick={() => setSelectedPayer(partnerUser.id)}
-              className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
-                selectedPayer === partnerUser.id
-                  ? 'bg-pink-600 text-white shadow-xs'
-                  : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200'
-              }`}
-            >
-              <div className="h-4 w-4 rounded-full bg-pink-400 text-[9px] flex items-center justify-center text-white font-bold">
-                {partnerUser.name[0]}
-              </div>
-              <span>{partnerUser.name.split(' ')[0]}</span>
-            </button>
+            {currentUser && (
+              <button
+                onClick={() => setSelectedPayer(currentUser.id)}
+                className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
+                  selectedPayer === currentUser.id
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200'
+                }`}
+              >
+                <div className="h-4 w-4 rounded-full bg-blue-400 text-[9px] flex items-center justify-center text-white font-bold">
+                  {currentUserName[0]}
+                </div>
+                <span>{currentUserName.split(' ')[0]}</span>
+              </button>
+            )}
+            {partner && (
+              <button
+                onClick={() => setSelectedPayer(partner.id)}
+                className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
+                  selectedPayer === partner.id
+                    ? 'bg-pink-600 text-white shadow-xs'
+                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200'
+                }`}
+              >
+                <div className="h-4 w-4 rounded-full bg-pink-400 text-[9px] flex items-center justify-center text-white font-bold">
+                  {partnerName[0]}
+                </div>
+                <span>{partnerName.split(' ')[0]}</span>
+              </button>
+            )}
           </div>
 
-          {/* Tipo de Movimiento */}
           <div className="flex items-center gap-1.5 flex-wrap">
             <span className="text-[11px] font-semibold text-slate-400 mr-1 flex items-center gap-1">
               <Filter className="w-3 h-3" /> Tipo:
@@ -319,7 +317,6 @@ export function TransactionsView({ transactions, onNewTransaction }: Transaction
         </div>
       </div>
 
-      {/* Resumen cuantitativo */}
       <div className="flex items-center justify-between px-1">
         <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">
           Mostrando {filteredTransactions.length} de {transactions.length} registros
@@ -330,7 +327,6 @@ export function TransactionsView({ transactions, onNewTransaction }: Transaction
         </div>
       </div>
 
-      {/* Lista de Registros */}
       <div className="space-y-2">
         {filteredTransactions.length === 0 ? (
           <div className="p-12 text-center bg-white dark:bg-[#161B22] border border-slate-200/80 dark:border-slate-800 rounded-2xl space-y-2">
@@ -344,10 +340,15 @@ export function TransactionsView({ transactions, onNewTransaction }: Transaction
           </div>
         ) : (
           filteredTransactions.map((tx) => {
-            const isUser = tx.paidByUserId === currentUser.id;
-            const payerName = isUser ? currentUser.name : partnerUser.name;
+            const isUser = tx.paidByUserId === currentUser?.id;
+            const payerName = isUser ? currentUserName : partnerName;
             const categoryName = getCategoryName(tx);
             const isSettlement = categoryName === 'Liquidación' || tx.category === 'Liquidación';
+
+            const txDate = tx.createdAt || tx.date;
+            const formattedDate = txDate 
+              ? new Date(txDate).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })
+              : 'Hoy';
 
             return (
               <div
@@ -391,7 +392,7 @@ export function TransactionsView({ transactions, onNewTransaction }: Transaction
                       </span>
                       <span>•</span>
                       <span className="flex items-center gap-1">
-                        <Clock className="w-3 h-3" /> {tx.createdAt || tx.date || 'Hoy'}
+                        <Clock className="w-3 h-3" /> {formattedDate}
                       </span>
                     </div>
                   </div>
@@ -399,7 +400,7 @@ export function TransactionsView({ transactions, onNewTransaction }: Transaction
 
                 <div className="text-right shrink-0">
                   <span
-                    className={`text-sm font-extrabold block ${
+                    className={`text-sm font-extrabold block font-numeric ${
                       isSettlement
                         ? 'text-emerald-600 dark:text-emerald-400'
                         : 'text-slate-900 dark:text-white'
@@ -408,7 +409,7 @@ export function TransactionsView({ transactions, onNewTransaction }: Transaction
                     {isSettlement ? '+' : '-'}${tx.amount.toFixed(2)}
                   </span>
                   {!isSettlement && (
-                    <span className="text-[10px] font-semibold text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md inline-block">
+                    <span className="text-[10px] font-semibold text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md inline-block mt-0.5">
                       {tx.splitRatio?.userA ?? 50}/{tx.splitRatio?.userB ?? 50}
                     </span>
                   )}
