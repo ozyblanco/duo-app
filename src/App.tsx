@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Loader2 } from 'lucide-react';
+import { supabase } from './lib/supabase'; // Ajusta la ruta a tu cliente de Supabase si varía
 import { useAuth } from './hooks/useAuth';
 import { useTransactions } from './hooks/useTransactions';
 import { AppLayout } from './components/layout/AppLayout';
@@ -22,15 +23,48 @@ import { currentUser } from './data/mockData';
 import type { SplitRatio } from './types';
 
 export default function App() {
-  const { user, loading } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const { transactions, addTransaction } = useTransactions();
   
-  // Estado local para vincular pareja
+  // Estado para verificar si existe vínculo de pareja en la BD
   const [isPartnerConnected, setIsPartnerConnected] = useState(false);
+  const [checkingPartner, setCheckingPartner] = useState(true);
 
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSettleModalOpen, setIsSettleModalOpen] = useState(false);
+
+  // Consultar en Supabase si el perfil ya posee un couple_id asignado
+  useEffect(() => {
+    async function checkPartnerStatus() {
+      if (!user) {
+        setCheckingPartner(false);
+        return;
+      }
+
+      try {
+        setCheckingPartner(true);
+        const { data: profile, error } = await supabase
+          .from('profiles')
+          .select('couple_id')
+          .eq('id', user.id)
+          .maybeSingle();
+
+        if (!error && profile?.couple_id) {
+          setIsPartnerConnected(true);
+        } else {
+          setIsPartnerConnected(false);
+        }
+      } catch (err: unknown) {
+        console.error('Error consultando vínculo de pareja:', err);
+        setIsPartnerConnected(false);
+      } finally {
+        setCheckingPartner(false);
+      }
+    }
+
+    checkPartnerStatus();
+  }, [user]);
 
   // Totales generales
   const totalJointSpent = transactions.reduce((acc, curr) => acc + curr.amount, 0);
@@ -100,8 +134,8 @@ export default function App() {
     });
   };
 
-  // PANTALLA DE CARGA: Espera a verificar si hay una sesión activa en Supabase
-  if (loading) {
+  // PANTALLA DE CARGA: Mientras valida auth y consulta la tabla profiles
+  if (authLoading || (user && checkingPartner)) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-[#0D1117]">
         <div className="flex items-center gap-2.5 text-slate-600 dark:text-slate-400">
@@ -117,11 +151,8 @@ export default function App() {
     return <AuthView />;
   }
 
-  // PASO 2: Si está autenticado pero no vinculado con su pareja
-  const rawUser = user as unknown as { partnerId?: string; partner_id?: string };
-  const hasPartner = isPartnerConnected || Boolean(rawUser.partnerId) || Boolean(rawUser.partner_id);
-
-  if (!hasPartner) {
+  // PASO 2: Si está autenticado pero no tiene un couple_id en la base de datos
+  if (!isPartnerConnected) {
     return (
       <PartnerConnectView 
         onComplete={() => setIsPartnerConnected(true)} 
