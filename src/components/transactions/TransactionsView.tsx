@@ -12,10 +12,15 @@ import {
   ArrowUpDown,
   CheckCircle2,
   Clock,
-  Calendar
+  Calendar,
+  Pencil,
+  Trash2
 } from 'lucide-react';
 import type { Transaction } from '@/types';
 import { useCoupleProfiles } from '@/hooks/useCoupleProfiles';
+import { useTransactions } from '@/hooks/useTransactions';
+import { useCurrency } from '@/hooks/useCurrency';
+import { EditTransactionModal } from '@/components/modals/EditTransactionModal';
 import { mockCategories } from '@/data/mockData';
 
 interface TransactionsViewProps {
@@ -23,8 +28,17 @@ interface TransactionsViewProps {
   onNewTransaction: () => void;
 }
 
+function getCategoryName(tx: Transaction) {
+  const catVal = tx.categoryId || tx.category;
+  if (!catVal) return 'General';
+  const cat = mockCategories.find((c) => c.id === catVal || c.name.toLowerCase() === catVal.toLowerCase());
+  return cat ? cat.name : catVal;
+}
+
 export function TransactionsView({ transactions, onNewTransaction }: TransactionsViewProps) {
   const { currentUser, partner } = useCoupleProfiles();
+  const { updateTransaction, deleteTransaction } = useTransactions();
+  const { formatAmount } = useCurrency();
 
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedPayer, setSelectedPayer] = useState<'all' | string>('all');
@@ -35,12 +49,8 @@ export function TransactionsView({ transactions, onNewTransaction }: Transaction
   const [endDate, setEndDate] = useState<string>('');
   const [txType, setTxType] = useState<'all' | 'expenses' | 'settlements'>('all');
 
-  const getCategoryName = (tx: Transaction) => {
-    const catVal = tx.categoryId || tx.category;
-    if (!catVal) return 'Sin categoría';
-    const cat = mockCategories.find((c) => c.id === catVal || c.name.toLowerCase() === catVal.toLowerCase());
-    return cat ? cat.name : catVal;
-  };
+  // Estado para el modal de edición
+  const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
 
   const filteredTransactions = useMemo(() => {
     const now = new Date();
@@ -114,11 +124,18 @@ export function TransactionsView({ transactions, onNewTransaction }: Transaction
     startDate !== '' ||
     endDate !== '';
 
-  const currentUserName = currentUser?.name || 'Tú';
-  const partnerName = partner?.name || 'Pareja';
+  const currentUserName = currentUser?.name ? currentUser.name.split(' ')[0] : 'Tú';
+  const partnerName = partner?.name ? partner.name.split(' ')[0] : 'Pareja';
+
+  const handleDelete = async (id: string, title: string) => {
+    if (confirm(`¿Estás seguro de que deseas eliminar "${title}"?`)) {
+      await deleteTransaction(id);
+    }
+  };
 
   return (
     <div className="space-y-6 pb-12">
+      {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-xl font-bold text-slate-900 dark:text-white tracking-tight flex items-center gap-2">
@@ -126,19 +143,20 @@ export function TransactionsView({ transactions, onNewTransaction }: Transaction
             Historial de Movimientos
           </h1>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-            Consulta, busca y filtra todos los gastos e intercambios de saldo
+            Consulta, busca, edita y filtra todos los gastos e intercambios de saldo
           </p>
         </div>
 
         <button
           onClick={onNewTransaction}
-          className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-4 py-2.5 rounded-xl transition-all shadow-xs active:scale-95 self-start sm:self-auto cursor-pointer"
+          className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold px-4 py-2.5 rounded-xl transition-all shadow-xs active:scale-95 self-start sm:self-auto cursor-pointer"
         >
           <Plus className="w-4 h-4" />
           <span>Nuevo Gasto</span>
         </button>
       </div>
 
+      {/* Barra de Filtros */}
       <div className="p-4 rounded-2xl bg-white dark:bg-[#161B22] border border-slate-200/80 dark:border-slate-800 space-y-3.5 shadow-xs">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <div className="relative">
@@ -148,7 +166,7 @@ export function TransactionsView({ transactions, onNewTransaction }: Transaction
               placeholder="Buscar por concepto..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-8 py-2 rounded-xl text-xs bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-hidden focus:ring-2 focus:ring-blue-500 transition-all"
+              className="w-full pl-10 pr-8 py-2 rounded-xl text-xs bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
             />
             {searchTerm && (
               <button
@@ -164,7 +182,7 @@ export function TransactionsView({ transactions, onNewTransaction }: Transaction
             <select
               value={selectedCategory}
               onChange={(e) => setSelectedCategory(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl text-xs bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-blue-500 cursor-pointer"
+              className="w-full px-3 py-2 rounded-xl text-xs bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
             >
               <option value="all">Todas las categorías</option>
               {mockCategories.map((cat) => (
@@ -181,7 +199,7 @@ export function TransactionsView({ transactions, onNewTransaction }: Transaction
             <select
               value={dateRange}
               onChange={(e) => setDateRange(e.target.value as 'all' | 'this_month' | 'last_30_days' | 'custom')}
-              className="w-full pl-10 pr-3 py-2 rounded-xl text-xs bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-blue-500 cursor-pointer appearance-none"
+              className="w-full pl-10 pr-3 py-2 rounded-xl text-xs bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer appearance-none"
             >
               <option value="all">Cualquier fecha</option>
               <option value="this_month">Este mes</option>
@@ -207,7 +225,7 @@ export function TransactionsView({ transactions, onNewTransaction }: Transaction
                 type="date"
                 value={startDate}
                 onChange={(e) => setStartDate(e.target.value)}
-                className="w-full px-3 py-1.5 rounded-xl text-xs bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-1.5 rounded-xl text-xs bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
             <div className="flex-1">
@@ -216,7 +234,7 @@ export function TransactionsView({ transactions, onNewTransaction }: Transaction
                 type="date"
                 value={endDate}
                 onChange={(e) => setEndDate(e.target.value)}
-                className="w-full px-3 py-1.5 rounded-xl text-xs bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-1.5 rounded-xl text-xs bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
           </div>
@@ -249,7 +267,7 @@ export function TransactionsView({ transactions, onNewTransaction }: Transaction
                 <div className="h-4 w-4 rounded-full bg-blue-400 text-[9px] flex items-center justify-center text-white font-bold">
                   {currentUserName[0]}
                 </div>
-                <span>{currentUserName.split(' ')[0]}</span>
+                <span>{currentUserName}</span>
               </button>
             )}
             {partner && (
@@ -264,7 +282,7 @@ export function TransactionsView({ transactions, onNewTransaction }: Transaction
                 <div className="h-4 w-4 rounded-full bg-pink-400 text-[9px] flex items-center justify-center text-white font-bold">
                   {partnerName[0]}
                 </div>
-                <span>{partnerName.split(' ')[0]}</span>
+                <span>{partnerName}</span>
               </button>
             )}
           </div>
@@ -317,16 +335,18 @@ export function TransactionsView({ transactions, onNewTransaction }: Transaction
         </div>
       </div>
 
+      {/* Conteo y Suma */}
       <div className="flex items-center justify-between px-1">
         <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">
           Mostrando {filteredTransactions.length} de {transactions.length} registros
         </span>
         <div className="flex items-center gap-1.5 text-xs font-bold text-slate-900 dark:text-white">
           <TrendingDown className="w-4 h-4 text-rose-500" />
-          <span>Suma: ${filteredTotal.toFixed(2)} USD</span>
+          <span>Suma: {formatAmount(filteredTotal)}</span>
         </div>
       </div>
 
+      {/* Lista de Movimientos con Acciones de Edición/Eliminación */}
       <div className="space-y-2">
         {filteredTransactions.length === 0 ? (
           <div className="p-12 text-center bg-white dark:bg-[#161B22] border border-slate-200/80 dark:border-slate-800 rounded-2xl space-y-2">
@@ -353,7 +373,7 @@ export function TransactionsView({ transactions, onNewTransaction }: Transaction
             return (
               <div
                 key={tx.id}
-                className={`p-4 rounded-2xl bg-white dark:bg-[#161B22] border transition-all flex items-center justify-between gap-4 ${
+                className={`p-4 rounded-2xl bg-white dark:bg-[#161B22] border transition-all flex items-center justify-between gap-4 group ${
                   isSettlement
                     ? 'border-emerald-500/40 bg-emerald-500/5 dark:bg-emerald-500/5'
                     : 'border-slate-200/80 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
@@ -398,27 +418,61 @@ export function TransactionsView({ transactions, onNewTransaction }: Transaction
                   </div>
                 </div>
 
-                <div className="text-right shrink-0">
-                  <span
-                    className={`text-sm font-extrabold block font-numeric ${
-                      isSettlement
-                        ? 'text-emerald-600 dark:text-emerald-400'
-                        : 'text-slate-900 dark:text-white'
-                    }`}
-                  >
-                    {isSettlement ? '+' : '-'}${tx.amount.toFixed(2)}
-                  </span>
-                  {!isSettlement && (
-                    <span className="text-[10px] font-semibold text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md inline-block mt-0.5">
-                      {tx.splitRatio?.userA ?? 50}/{tx.splitRatio?.userB ?? 50}
+                <div className="flex items-center gap-3 shrink-0">
+                  <div className="text-right">
+                    <span
+                      className={`text-sm font-extrabold block font-numeric ${
+                        isSettlement
+                          ? 'text-emerald-600 dark:text-emerald-400'
+                          : 'text-slate-900 dark:text-white'
+                      }`}
+                    >
+                      {isSettlement ? '+' : '-'}{formatAmount(tx.amount)}
                     </span>
-                  )}
+                    {!isSettlement && (
+                      <span className="text-[10px] font-semibold text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md inline-block mt-0.5">
+                        {tx.splitRatio?.userA ?? 50}/{tx.splitRatio?.userB ?? 50}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Botones de Acción (Editar y Eliminar) */}
+                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    {!isSettlement && (
+                      <button
+                        type="button"
+                        onClick={() => setEditingTransaction(tx)}
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-500/10 transition-all cursor-pointer"
+                        title="Editar movimiento"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => handleDelete(tx.id, tx.title)}
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/10 transition-all cursor-pointer"
+                      title="Eliminar movimiento"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 </div>
               </div>
             );
           })
         )}
       </div>
+
+      {/* Modal de Edición */}
+      {editingTransaction && (
+        <EditTransactionModal
+          transaction={editingTransaction}
+          isOpen={Boolean(editingTransaction)}
+          onClose={() => setEditingTransaction(null)}
+          onUpdate={updateTransaction}
+        />
+      )}
     </div>
   );
 }

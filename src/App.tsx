@@ -4,6 +4,7 @@ import { supabase } from './lib/supabase';
 import { useAuth } from './hooks/useAuth';
 import { useTransactions } from './hooks/useTransactions';
 import { useCoupleProfiles } from './hooks/useCoupleProfiles';
+import { useAccounts } from './components/accounts/useAccounts';
 import { NotificationProvider } from './context/NotificationContext';
 import { CurrencyProvider } from './context/CurrencyContext';
 import { useNotifications } from './hooks/useNotifications';
@@ -14,6 +15,7 @@ import { TransactionList } from './components/dashboard/TransactionList';
 import { NewTransactionModal } from './components/modals/NewTransactionModal';
 import { SettleUpModal } from './components/modals/SettleUpModal';
 import { MonthEndBanner } from './components/common/MonthEndBanner';
+import { OfflineBanner } from './components/common/OfflineBanner';
 import { AccountsView } from './components/accounts/AccountsView';
 import { GoalsView } from './components/goals/GoalsView';
 import { TransactionsView } from './components/transactions/TransactionsView';
@@ -27,8 +29,9 @@ import type { SplitRatio } from './types';
 
 function MainApp() {
   const { user, loading: authLoading } = useAuth();
-  const { transactions, addTransaction } = useTransactions();
+  const { transactions, addTransaction, refreshTransactions } = useTransactions();
   const { currentUser, partner, loading: profilesLoading } = useCoupleProfiles();
+  const { debitAccount } = useAccounts();
   const { addNotification } = useNotifications();
 
   const [isPartnerConnected, setIsPartnerConnected] = useState(false);
@@ -162,6 +165,8 @@ function MainApp() {
     amount: number;
     paidByUserId: string;
     category: string;
+    accountId?: string;
+    deductAmount?: number;
     createdAt: string;
   }) => {
     const payerId = settlementData.paidByUserId || currentUserId;
@@ -174,11 +179,17 @@ function MainApp() {
       ownership: 'joint',
       paidByUserId: payerId,
       categoryId: settlementData.category,
+      accountId: settlementData.accountId,
       splitRatio: { userA: 50, userB: 50 },
       createdAt: settlementData.createdAt,
     });
 
     if (success) {
+      // Débito automático de la cuenta seleccionada
+      if (settlementData.accountId && settlementData.deductAmount) {
+        await debitAccount(settlementData.accountId, settlementData.deductAmount);
+      }
+
       addNotification({
         title: 'Saldos al día 🎉',
         message: `Se liquidaron las cuentas pendientes por un total de $${settlementData.amount.toFixed(2)} USD.`,
@@ -243,7 +254,6 @@ function MainApp() {
             onViewAll={() => setActiveTab('transactions')}
             onNewTransaction={() => setIsModalOpen(true)}
           />
-          {/* Aquí pasamos las transacciones reales */}
           <MonthlyAnalytics transactions={transactions} />
         </div>
       )}
@@ -277,6 +287,8 @@ function MainApp() {
         netBalance={netBalance}
         onSubmit={handleSettleUp}
       />
+
+      <OfflineBanner onSyncRequest={refreshTransactions} />
     </AppLayout>
   );
 }

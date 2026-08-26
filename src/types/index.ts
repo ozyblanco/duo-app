@@ -45,6 +45,7 @@ export interface Transaction {
   type?: 'income' | 'expense' | string;
   ownership?: 'joint' | 'individual' | string;
   accountId?: string;
+  receiptUrl?: string;
 }
 
 export interface Goal {

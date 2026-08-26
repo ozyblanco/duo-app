@@ -1,6 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
+import { offlineQueue } from '@/lib/offlineQueue';
 import type { Transaction } from '@/types';
+
+const CACHE_KEY = 'duo_transactions_cache';
 
 const isValidUUID = (id?: string | null): boolean => {
   if (!id) return false;
@@ -8,13 +11,27 @@ const isValidUUID = (id?: string | null): boolean => {
 };
 
 export function useTransactions() {
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [transactions, setTransactions] = useState<Transaction[]>(() => {
+    if (typeof window === 'undefined') return [];
+    try {
+      const cached = localStorage.getItem(CACHE_KEY);
+      return cached ? JSON.parse(cached) : [];
+    } catch {
+      return [];
+    }
+  });
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [coupleId, setCoupleId] = useState<string | null>(null);
 
   const fetchTransactions = useCallback(async () => {
     try {
+      if (!navigator.onLine) {
+        setLoading(false);
+        return;
+      }
+
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         setTransactions([]);
@@ -33,6 +50,9 @@ export function useTransactions() {
       }
 
       setCoupleId(profile.couple_id);
+
+      // Sincronizar cola offline si existen elementos pendientes
+      await offlineQueue.syncAll(profile.couple_id);
 
       const { data, error: txError } = await supabase
         .from('transactions')
@@ -58,6 +78,7 @@ export function useTransactions() {
       }));
 
       setTransactions(mappedTransactions);
+      localStorage.setItem(CACHE_KEY, JSON.stringify(mappedTransactions));
       setError(null);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Error al cargar transacciones.';
@@ -81,7 +102,7 @@ export function useTransactions() {
 
   // Suscripción Realtime
   useEffect(() => {
-    if (!coupleId) return;
+    if (!coupleId || !navigator.onLine) return;
 
     const channel = supabase
       .channel(`realtime-transactions-${coupleId}`)
@@ -104,9 +125,37 @@ export function useTransactions() {
     };
   }, [coupleId, fetchTransactions]);
 
+  // Agregar Gasto
   const addTransaction = async (
     newTxData: Omit<Transaction, 'id' | 'date'> & { createdAt?: string; date?: string }
   ): Promise<boolean> => {
+    const createdAtVal = newTxData.createdAt || newTxData.date || new Date().toISOString();
+
+    if (!navigator.onLine) {
+      const pending = offlineQueue.add({ ...newTxData, createdAt: createdAtVal });
+      const optimisticTx: Transaction = {
+        id: pending.tempId,
+        title: newTxData.title,
+        amount: Number(newTxData.amount),
+        currency: newTxData.currency || 'USD',
+        type: newTxData.type || 'expense',
+        ownership: newTxData.ownership || 'joint',
+        paidByUserId: newTxData.paidByUserId,
+        categoryId: newTxData.categoryId || 'General',
+        accountId: newTxData.accountId,
+        splitRatio: newTxData.splitRatio || { userA: 50, userB: 50 },
+        createdAt: createdAtVal,
+        date: createdAtVal,
+      };
+
+      setTransactions((prev) => {
+        const updated = [optimisticTx, ...prev];
+        localStorage.setItem(CACHE_KEY, JSON.stringify(updated));
+        return updated;
+      });
+      return true;
+    }
+
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Usuario no autenticado');
@@ -125,10 +174,8 @@ export function useTransactions() {
         throw new Error('No tienes un espacio de pareja vinculado.');
       }
 
-      // Validar que paid_by_user_id sea un UUID válido de Supabase
       const finalPaidBy = isValidUUID(newTxData.paidByUserId) ? newTxData.paidByUserId : user.id;
       const finalAccountId = isValidUUID(newTxData.accountId) ? newTxData.accountId : null;
-      const createdAtVal = newTxData.createdAt || newTxData.date || new Date().toISOString();
 
       const newRow = {
         couple_id: currentCoupleId,
@@ -150,10 +197,7 @@ export function useTransactions() {
         .select()
         .single();
 
-      if (insertError) {
-        console.error('Detalle error Supabase:', insertError);
-        throw insertError;
-      }
+      if (insertError) throw insertError;
 
       const formatted: Transaction = {
         id: data.id,
@@ -170,27 +214,88 @@ export function useTransactions() {
         date: data.created_at,
       };
 
-      setTransactions((prev) => [formatted, ...prev]);
+      setTransactions((prev) => {
+        const updated = [formatted, ...prev];
+        localStorage.setItem(CACHE_KEY, JSON.stringify(updated));
+        return updated;
+      });
       return true;
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Error al guardar la transacción.';
-      console.error('Error adding transaction:', err);
-      alert(`No se pudo guardar: ${msg}`);
+      console.error('Error adding transaction online, fallback offline:', err);
+      offlineQueue.add({ ...newTxData, createdAt: createdAtVal });
+      return true;
+    }
+  };
+
+  // Editar / Actualizar Gasto
+  const updateTransaction = async (
+    id: string,
+    updatedFields: Partial<Omit<Transaction, 'id'>>
+  ): Promise<boolean> => {
+    try {
+      if (navigator.onLine && !id.startsWith('offline-')) {
+        const updatePayload: Record<string, unknown> = {};
+
+        if (updatedFields.title !== undefined) updatePayload.title = updatedFields.title;
+        if (updatedFields.amount !== undefined) updatePayload.amount = Number(updatedFields.amount);
+        if (updatedFields.currency !== undefined) updatePayload.currency = updatedFields.currency;
+        if (updatedFields.categoryId !== undefined) updatePayload.category_id = updatedFields.categoryId;
+        if (updatedFields.paidByUserId !== undefined) {
+          updatePayload.paid_by_user_id = isValidUUID(updatedFields.paidByUserId) ? updatedFields.paidByUserId : null;
+        }
+        if (updatedFields.accountId !== undefined) {
+          updatePayload.account_id = isValidUUID(updatedFields.accountId) ? updatedFields.accountId : null;
+        }
+        if (updatedFields.splitRatio !== undefined) updatePayload.split_ratio = updatedFields.splitRatio;
+        if (updatedFields.createdAt !== undefined) updatePayload.created_at = updatedFields.createdAt;
+
+        const { error: updateError } = await supabase
+          .from('transactions')
+          .update(updatePayload)
+          .eq('id', id);
+
+        if (updateError) throw updateError;
+      }
+
+      setTransactions((prev) => {
+        const updated = prev.map((tx) =>
+          tx.id === id ? { ...tx, ...updatedFields } : tx
+        );
+        localStorage.setItem(CACHE_KEY, JSON.stringify(updated));
+        return updated;
+      });
+
+      return true;
+    } catch (err: unknown) {
+      console.error('Error updating transaction:', err);
+      alert('No se pudo actualizar el movimiento');
       return false;
     }
   };
 
-  const deleteTransaction = async (id: string) => {
+  // Eliminar Gasto
+  const deleteTransaction = async (id: string): Promise<boolean> => {
     try {
-      const { error: delError } = await supabase
-        .from('transactions')
-        .delete()
-        .eq('id', id);
+      if (id.startsWith('offline-')) {
+        offlineQueue.remove(id);
+      } else {
+        const { error: delError } = await supabase
+          .from('transactions')
+          .delete()
+          .eq('id', id);
 
-      if (delError) throw delError;
-      setTransactions((prev) => prev.filter((tx) => tx.id !== id));
+        if (delError) throw delError;
+      }
+
+      setTransactions((prev) => {
+        const updated = prev.filter((tx) => tx.id !== id);
+        localStorage.setItem(CACHE_KEY, JSON.stringify(updated));
+        return updated;
+      });
+      return true;
     } catch (err: unknown) {
       console.error('Error deleting transaction:', err);
+      return false;
     }
   };
 
@@ -199,6 +304,7 @@ export function useTransactions() {
     loading,
     error,
     addTransaction,
+    updateTransaction,
     deleteTransaction,
     refreshTransactions: fetchTransactions,
   };

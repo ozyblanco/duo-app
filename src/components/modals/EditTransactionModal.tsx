@@ -1,57 +1,56 @@
 import React, { useState, useRef } from 'react';
-import { X, DollarSign, Tag, User, CreditCard, PieChart, ArrowLeftRight, RefreshCw, ImagePlus, Loader2 } from 'lucide-react';
+import { X, DollarSign, Tag, User, CreditCard, PieChart, ArrowLeftRight, RefreshCw, Loader2, ImagePlus } from 'lucide-react';
 import { useCoupleProfiles } from '@/hooks/useCoupleProfiles';
 import { useAccounts } from '@/components/accounts/useAccounts';
 import { useExchangeRates } from '@/hooks/useExchangeRates';
 import { uploadReceipt } from '@/utils/uploadReceipt';
-import type { SplitRatio } from '@/types';
+import type { Transaction, SplitRatio } from '@/types';
 
-interface NewTransactionModalProps {
+interface EditTransactionModalProps {
+  transaction: Transaction | null;
   isOpen: boolean;
   onClose: () => void;
-  onSubmit: (data: {
-    title: string;
-    amount: number;
-    paidByUserId: string;
-    category: string;
-    accountId?: string;
-    currency?: string;
-    splitRatio?: SplitRatio;
-    receiptUrl?: string;
-    createdAt: string;
-  }) => void;
+  onUpdate: (id: string, data: Partial<Omit<Transaction, 'id'>>) => Promise<boolean>;
 }
 
-export function NewTransactionModal({ isOpen, onClose, onSubmit }: NewTransactionModalProps) {
+export function EditTransactionModal({ transaction, isOpen, onClose, onUpdate }: EditTransactionModalProps) {
   const { currentUser, partner } = useCoupleProfiles();
   const { accounts } = useAccounts();
-  const { rates, isLoading, refetch } = useExchangeRates();
+  const { rates, isLoading: ratesLoading, refetch } = useExchangeRates();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const [title, setTitle] = useState('');
-  const [amount, setAmount] = useState('');
-  const [selectedPayerId, setSelectedPayerId] = useState<string>('');
-  const [category, setCategory] = useState('Comida');
-  const [accountId, setAccountId] = useState<string>('');
+  const [title, setTitle] = useState(transaction?.title || '');
+  const [amount, setAmount] = useState(transaction ? String(transaction.amount) : '');
+  const [selectedPayerId, setSelectedPayerId] = useState(transaction?.paidByUserId || '');
+  const [category, setCategory] = useState(transaction?.categoryId || transaction?.category || 'Comida');
+  const [accountId, setAccountId] = useState(transaction?.accountId || '');
   const [currency, setCurrency] = useState<'USD' | 'VES'>('USD');
   const [rateType, setRateType] = useState<'binance' | 'bcv'>('binance');
-  const [splitType, setSplitType] = useState<'50/50' | '100_USER' | '100_PARTNER'>('50/50');
+  const [splitType, setSplitType] = useState<'50/50' | '100_USER' | '100_PARTNER'>(() => {
+    if (transaction?.splitRatio?.userA === 100) return '100_USER';
+    if (transaction?.splitRatio?.userB === 100) return '100_PARTNER';
+    return '50/50';
+  });
+  const [createdAt, setCreatedAt] = useState(() => {
+    if (transaction?.createdAt) return transaction.createdAt.substring(0, 10);
+    return new Date().toISOString().substring(0, 10);
+  });
 
-  // Estado del comprobante
+  // Comprobante
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
-  const [receiptPreview, setReceiptPreview] = useState<string | null>(null);
-  const [isUploading, setIsUploading] = useState(false);
+  const [receiptPreview, setReceiptPreview] = useState<string | null>(transaction?.receiptUrl || null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  if (!isOpen) return null;
+  if (!isOpen || !transaction) return null;
 
   const currentUserId = currentUser?.id || '';
   const partnerId = partner?.id || '';
   const currentUserName = currentUser?.name ? currentUser.name.split(' ')[0] : 'Tú';
   const partnerName = partner?.name ? partner.name.split(' ')[0] : 'Pareja';
 
-  const activePayerId = selectedPayerId || currentUserId;
-  const activeAccountId = accountId || (accounts[0]?.id ?? '');
+  const activePayerId = selectedPayerId || transaction.paidByUserId || currentUserId;
+  const activeAccountId = accountId || transaction.accountId || (accounts[0]?.id ?? '');
 
   const numericAmount = parseFloat(amount) || 0;
   const activeRate = (rateType === 'bcv' ? rates.bcvUsd : rates.binanceUsdt) || 36.5;
@@ -79,44 +78,47 @@ export function NewTransactionModal({ isOpen, onClose, onSubmit }: NewTransactio
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title || numericAmount <= 0) return;
+    if (!title.trim() || numericAmount <= 0) return;
 
-    setIsUploading(true);
+    try {
+      setIsSubmitting(true);
 
-    let uploadedUrl: string | undefined = undefined;
-    if (receiptFile) {
-      const url = await uploadReceipt(receiptFile);
-      if (url) uploadedUrl = url;
+      let finalReceiptUrl: string | undefined = receiptPreview || undefined;
+
+      if (receiptFile) {
+        const uploaded = await uploadReceipt(receiptFile);
+        if (uploaded) finalReceiptUrl = uploaded;
+      } else if (!receiptPreview) {
+        finalReceiptUrl = undefined;
+      }
+
+      const finalAmountInUsd =
+        currency === 'VES' ? Number((numericAmount / activeRate).toFixed(2)) : numericAmount;
+
+      let splitRatio: SplitRatio = { userA: 50, userB: 50 };
+      if (splitType === '100_USER') {
+        splitRatio = { userA: 100, userB: 0 };
+      } else if (splitType === '100_PARTNER') {
+        splitRatio = { userA: 0, userB: 100 };
+      }
+
+      const success = await onUpdate(transaction.id, {
+        title: title.trim(),
+        amount: finalAmountInUsd,
+        paidByUserId: activePayerId,
+        categoryId: category,
+        accountId: activeAccountId || undefined,
+        splitRatio,
+        receiptUrl: finalReceiptUrl,
+        createdAt: new Date(createdAt).toISOString(),
+      });
+
+      if (success) {
+        onClose();
+      }
+    } finally {
+      setIsSubmitting(false);
     }
-
-    const finalAmountInUsd =
-      currency === 'VES' ? Number((numericAmount / activeRate).toFixed(2)) : numericAmount;
-
-    let splitRatio: SplitRatio = { userA: 50, userB: 50 };
-    if (splitType === '100_USER') {
-      splitRatio = { userA: 100, userB: 0 };
-    } else if (splitType === '100_PARTNER') {
-      splitRatio = { userA: 0, userB: 100 };
-    }
-
-    onSubmit({
-      title: title.trim(),
-      amount: finalAmountInUsd,
-      paidByUserId: activePayerId,
-      category,
-      accountId: activeAccountId || undefined,
-      currency: 'USD',
-      splitRatio,
-      receiptUrl: uploadedUrl,
-      createdAt: new Date().toISOString(),
-    });
-
-    setIsUploading(false);
-    setTitle('');
-    setAmount('');
-    setSelectedPayerId('');
-    handleRemoveReceipt();
-    onClose();
   };
 
   return (
@@ -127,7 +129,7 @@ export function NewTransactionModal({ isOpen, onClose, onSubmit }: NewTransactio
       >
         <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800/80">
           <h2 className="text-base font-bold text-slate-900 dark:text-white tracking-tight">
-            Añadir Nuevo Gasto
+            Editar Movimiento
           </h2>
           <button
             onClick={onClose}
@@ -139,7 +141,6 @@ export function NewTransactionModal({ isOpen, onClose, onSubmit }: NewTransactio
         </div>
 
         <form onSubmit={handleSubmit} className="mt-5 space-y-4">
-          {/* Monto y Moneda */}
           <div>
             <div className="flex items-center justify-between mb-1.5">
               <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wider">
@@ -148,10 +149,10 @@ export function NewTransactionModal({ isOpen, onClose, onSubmit }: NewTransactio
               <button
                 type="button"
                 onClick={refetch}
-                disabled={isLoading}
+                disabled={ratesLoading}
                 className="text-[10px] text-slate-400 hover:text-blue-400 flex items-center gap-1 transition-colors cursor-pointer"
               >
-                <RefreshCw className={`w-3 h-3 ${isLoading ? 'animate-spin text-blue-400' : ''}`} />
+                <RefreshCw className={`w-3 h-3 ${ratesLoading ? 'animate-spin text-blue-400' : ''}`} />
                 <span>Tasa: Bs. {activeRate.toFixed(2)}</span>
               </button>
             </div>
@@ -168,7 +169,7 @@ export function NewTransactionModal({ isOpen, onClose, onSubmit }: NewTransactio
                   value={amount}
                   onChange={(e) => setAmount(e.target.value)}
                   required
-                  className="w-full pl-9 pr-4 py-2.5 bg-slate-50 dark:bg-[#0B0F17] border border-slate-200/80 dark:border-slate-800 rounded-xl text-sm font-bold font-numeric text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 transition-all"
+                  className="w-full pl-9 pr-4 py-2.5 bg-slate-50 dark:bg-[#0B0F17] border border-slate-200/80 dark:border-slate-800 rounded-xl text-sm font-bold font-numeric text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/30 transition-all"
                 />
               </div>
 
@@ -219,7 +220,6 @@ export function NewTransactionModal({ isOpen, onClose, onSubmit }: NewTransactio
             )}
           </div>
 
-          {/* Concepto */}
           <div>
             <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-1.5">
               Concepto / Descripción
@@ -230,16 +230,15 @@ export function NewTransactionModal({ isOpen, onClose, onSubmit }: NewTransactio
               </div>
               <input
                 type="text"
-                placeholder="Ej. Mercado semanal, Farmatodo, Cena..."
+                placeholder="Ej. Mercado semanal..."
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 required
-                className="w-full pl-9 pr-4 py-2.5 bg-slate-50 dark:bg-[#0B0F17] border border-slate-200/80 dark:border-slate-800 rounded-xl text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 transition-all"
+                className="w-full pl-9 pr-4 py-2.5 bg-slate-50 dark:bg-[#0B0F17] border border-slate-200/80 dark:border-slate-800 rounded-xl text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/30 transition-all"
               />
             </div>
           </div>
 
-          {/* Quién Pagó */}
           <div>
             <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-1.5">
               ¿Quién pagó?
@@ -272,7 +271,6 @@ export function NewTransactionModal({ isOpen, onClose, onSubmit }: NewTransactio
             </div>
           </div>
 
-          {/* Cuenta Origen y Categoría */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="flex items-center gap-1 text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-1.5">
@@ -315,7 +313,6 @@ export function NewTransactionModal({ isOpen, onClose, onSubmit }: NewTransactio
             </div>
           </div>
 
-          {/* Tipo de División */}
           <div>
             <label className="flex items-center gap-1 text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-1.5">
               <PieChart className="w-3.5 h-3.5" />
@@ -358,10 +355,22 @@ export function NewTransactionModal({ isOpen, onClose, onSubmit }: NewTransactio
             </div>
           </div>
 
-          {/* Adjuntar Comprobante */}
           <div>
             <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-1.5">
-              Comprobante / Captura (Opcional)
+              Fecha
+            </label>
+            <input
+              type="date"
+              value={createdAt}
+              onChange={(e) => setCreatedAt(e.target.value)}
+              className="w-full px-3 py-2.5 bg-slate-50 dark:bg-[#0B0F17] border border-slate-200/80 dark:border-slate-800 rounded-xl text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/30 cursor-pointer"
+            />
+          </div>
+
+          {/* Comprobante en Edición */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-1.5">
+              Comprobante / Captura
             </label>
             <input
               ref={fileInputRef}
@@ -378,19 +387,20 @@ export function NewTransactionModal({ isOpen, onClose, onSubmit }: NewTransactio
                 className="w-full py-3 px-4 border border-dashed border-slate-300 dark:border-slate-700 rounded-xl flex items-center justify-center gap-2 text-xs font-semibold text-slate-600 dark:text-slate-400 hover:border-blue-500 hover:text-blue-500 transition-colors cursor-pointer"
               >
                 <ImagePlus className="w-4 h-4" />
-                <span>Subir comprobante o captura de pago</span>
+                <span>Adjuntar nuevo comprobante</span>
               </button>
             ) : (
               <div className="relative inline-block mt-1">
                 <img
                   src={receiptPreview}
-                  alt="Vista previa del comprobante"
+                  alt="Comprobante"
                   className="w-20 h-20 object-cover rounded-xl border border-slate-200 dark:border-slate-700"
                 />
                 <button
                   type="button"
                   onClick={handleRemoveReceipt}
                   className="absolute -top-2 -right-2 bg-rose-500 text-white p-1 rounded-full hover:bg-rose-600 shadow-md cursor-pointer"
+                  title="Eliminar comprobante"
                 >
                   <X className="w-3 h-3" />
                 </button>
@@ -398,23 +408,22 @@ export function NewTransactionModal({ isOpen, onClose, onSubmit }: NewTransactio
             )}
           </div>
 
-          {/* Botones */}
           <div className="pt-3 flex items-center justify-end gap-3">
             <button
               type="button"
               onClick={onClose}
-              disabled={isUploading}
+              disabled={isSubmitting}
               className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/60 transition-all cursor-pointer disabled:opacity-50"
             >
               Cancelar
             </button>
             <button
               type="submit"
-              disabled={isUploading}
+              disabled={isSubmitting}
               className="px-5 py-2 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white shadow-md shadow-blue-500/20 active:scale-95 transition-all cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
             >
-              {isUploading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-              <span>Guardar Gasto</span>
+              {isSubmitting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+              <span>Guardar Cambios</span>
             </button>
           </div>
         </form>

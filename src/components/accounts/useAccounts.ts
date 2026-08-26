@@ -123,6 +123,31 @@ export function useAccounts() {
     }
   };
 
+  // Débito automático de saldo (para pagos y liquidaciones)
+  const debitAccount = async (id: string, amountToDeduct: number): Promise<boolean> => {
+    try {
+      const target = accounts.find((a) => a.id === id);
+      if (!target) return false;
+
+      const newBalance = Number((target.balance - amountToDeduct).toFixed(2));
+
+      const { error } = await supabase
+        .from('accounts')
+        .update({ balance: newBalance })
+        .eq('id', id);
+
+      if (error) throw error;
+
+      setAccounts((prev) =>
+        prev.map((acc) => (acc.id === id ? { ...acc, balance: newBalance } : acc))
+      );
+      return true;
+    } catch (err) {
+      console.error('Error al debitar saldo de la cuenta:', err);
+      return false;
+    }
+  };
+
   // Mover a papelera (Soft delete)
   const softDeleteAccount = async (id: string) => {
     try {
@@ -195,6 +220,7 @@ export function useAccounts() {
     isLoading,
     addAccount,
     updateAccount,
+    debitAccount,
     softDeleteAccount,
     restoreAccount,
     permanentDeleteAccount,

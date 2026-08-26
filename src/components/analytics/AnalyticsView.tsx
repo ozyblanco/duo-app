@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { 
   PieChart, 
   TrendingUp, 
@@ -7,11 +7,17 @@ import {
   BarChart2, 
   Award,
   ShoppingBag,
-  CalendarDays
+  CalendarDays,
+  Download,
+  FileSpreadsheet,
+  FileText,
+  ChevronDown
 } from 'lucide-react';
 import type { Transaction } from '@/types';
 import { mockCategories } from '@/data/mockData';
 import { useCoupleProfiles } from '@/hooks/useCoupleProfiles';
+import { useCurrency } from '@/hooks/useCurrency';
+import { exportToCSV, exportToPDF } from '@/utils/exportReports';
 
 interface AnalyticsViewProps {
   transactions: Transaction[];
@@ -25,6 +31,8 @@ function getCategoryName(categoryId?: string) {
 
 export function AnalyticsView({ transactions }: AnalyticsViewProps) {
   const { currentUser, partner } = useCoupleProfiles();
+  const { formatAmount } = useCurrency();
+  const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
 
   const currentUserId = currentUser?.id;
   const currentUserName = currentUser?.name ? currentUser.name.split(' ')[0] : 'Tú';
@@ -84,16 +92,79 @@ export function AnalyticsView({ transactions }: AnalyticsViewProps) {
   const userPercentage = totalSpent > 0 ? Math.round((userTotal / totalSpent) * 100) : 50;
   const partnerPercentage = 100 - userPercentage;
 
+  const exportOptions = {
+    currentUserName,
+    partnerName,
+    currentUserId,
+  };
+
+  const handleExportCSV = () => {
+    exportToCSV(transactions, exportOptions);
+    setIsExportMenuOpen(false);
+  };
+
+  const handleExportPDF = () => {
+    exportToPDF(
+      transactions,
+      categoryStats,
+      {
+        totalSpent,
+        userTotal,
+        partnerTotal,
+        dailyAverage,
+      },
+      exportOptions
+    );
+    setIsExportMenuOpen(false);
+  };
+
   return (
     <div className="space-y-6 pb-12">
-      <div>
-        <h1 className="text-xl font-bold text-slate-900 dark:text-white tracking-tight flex items-center gap-2">
-          <PieChart className="w-6 h-6 text-blue-600 dark:text-blue-400" />
-          Análisis de Gastos & Reportes
-        </h1>
-        <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-          Visualiza los patrones de consumo de la pareja y distribuciones por categoría
-        </p>
+      {/* Header con botón de Exportar */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-xl font-bold text-slate-900 dark:text-white tracking-tight flex items-center gap-2">
+            <PieChart className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+            Análisis de Gastos & Reportes
+          </h1>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+            Visualiza los patrones de consumo de la pareja y genera balances exportables
+          </p>
+        </div>
+
+        {/* Menú de Exportación */}
+        <div className="relative self-start sm:self-auto">
+          <button
+            type="button"
+            onClick={() => setIsExportMenuOpen(!isExportMenuOpen)}
+            className="flex items-center gap-2 bg-slate-900 dark:bg-white hover:bg-slate-800 dark:hover:bg-slate-100 text-white dark:text-slate-900 text-xs font-bold px-4 py-2.5 rounded-xl transition-all shadow-sm active:scale-95 cursor-pointer"
+          >
+            <Download className="w-4 h-4" />
+            <span>Exportar Reporte</span>
+            <ChevronDown className="w-3.5 h-3.5 opacity-70" />
+          </button>
+
+          {isExportMenuOpen && (
+            <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-[#161B22] border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl z-30 overflow-hidden py-1.5 animate-in fade-in zoom-in-95 duration-100">
+              <button
+                type="button"
+                onClick={handleExportPDF}
+                className="w-full px-3.5 py-2.5 text-left text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-2.5 transition-colors cursor-pointer"
+              >
+                <FileText className="w-4 h-4 text-rose-500" />
+                <span>Descargar en PDF</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleExportCSV}
+                className="w-full px-3.5 py-2.5 text-left text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-2.5 transition-colors cursor-pointer"
+              >
+                <FileSpreadsheet className="w-4 h-4 text-emerald-500" />
+                <span>Descargar en Excel (CSV)</span>
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Cards Superiores */}
@@ -103,8 +174,8 @@ export function AnalyticsView({ transactions }: AnalyticsViewProps) {
             <span className="text-xs font-semibold">Gasto Total Acumulado</span>
             <DollarSign className="w-4 h-4 text-blue-500" />
           </div>
-          <p className="text-xl font-extrabold text-slate-900 dark:text-white">
-            ${totalSpent.toFixed(2)} <span className="text-xs font-normal text-slate-400">USD</span>
+          <p className="text-xl font-extrabold text-slate-900 dark:text-white font-numeric">
+            {formatAmount(totalSpent)}
           </p>
           <span className="text-[10px] text-emerald-500 font-bold flex items-center gap-0.5">
             <TrendingUp className="w-3.5 h-3.5" /> Basado en {expenseTransactions.length} registros
@@ -116,7 +187,7 @@ export function AnalyticsView({ transactions }: AnalyticsViewProps) {
             <span className="text-xs font-semibold">Promedio Diario</span>
             <CalendarDays className="w-4 h-4 text-purple-500" />
           </div>
-          <p className="text-xl font-extrabold text-slate-900 dark:text-white">
+          <p className="text-xl font-extrabold text-slate-900 dark:text-white font-numeric">
             ${dailyAverage} <span className="text-xs font-normal text-slate-400">/ día</span>
           </p>
           <span className="text-[10px] text-slate-400 font-medium">
@@ -129,11 +200,11 @@ export function AnalyticsView({ transactions }: AnalyticsViewProps) {
             <span className="text-xs font-semibold">Categoría Mayoritaria</span>
             <Award className="w-4 h-4 text-amber-500" />
           </div>
-          <p className="text-xl font-extrabold text-slate-900 dark:text-white">
+          <p className="text-xl font-extrabold text-slate-900 dark:text-white truncate">
             {topCategory.categoryName}
           </p>
           <span className="text-[10px] text-slate-500 font-semibold">
-            ${topCategory.total.toFixed(2)} USD ({categoryStats[0]?.percentage || 0}% del total)
+            {formatAmount(topCategory.total)} ({categoryStats[0]?.percentage || 0}% del total)
           </span>
         </div>
       </div>
@@ -168,11 +239,11 @@ export function AnalyticsView({ transactions }: AnalyticsViewProps) {
             <div className="flex items-center gap-2">
               <div className="w-2.5 h-2.5 rounded-full bg-blue-500" />
               <span className="font-bold text-slate-800 dark:text-slate-200">{currentUserName}</span>
-              <span className="text-slate-400">(${userTotal.toFixed(2)} USD • {userPercentage}%)</span>
+              <span className="text-slate-400 font-numeric">({formatAmount(userTotal)} • {userPercentage}%)</span>
             </div>
 
             <div className="flex items-center gap-2">
-              <span className="text-slate-400">(${partnerTotal.toFixed(2)} USD • {partnerPercentage}%)</span>
+              <span className="text-slate-400 font-numeric">({formatAmount(partnerTotal)} • {partnerPercentage}%)</span>
               <span className="font-bold text-slate-800 dark:text-slate-200">{partnerName}</span>
               <div className="w-2.5 h-2.5 rounded-full bg-pink-500" />
             </div>
@@ -205,8 +276,8 @@ export function AnalyticsView({ transactions }: AnalyticsViewProps) {
                   </span>
                   <div className="flex items-center gap-2">
                     <span className="text-slate-400">{item.count} transacciones</span>
-                    <span className="text-slate-900 dark:text-white font-extrabold">
-                      ${item.total.toFixed(2)} USD
+                    <span className="text-slate-900 dark:text-white font-extrabold font-numeric">
+                      {formatAmount(item.total)}
                     </span>
                   </div>
                 </div>
@@ -220,10 +291,10 @@ export function AnalyticsView({ transactions }: AnalyticsViewProps) {
 
                 <div className="flex items-center justify-between text-[10px] text-slate-400 pt-0.5">
                   <span>{item.percentage}% del total</span>
-                  <div className="flex items-center gap-3">
-                    <span>{currentUserName}: ${item.userPaid.toFixed(2)}</span>
+                  <div className="flex items-center gap-3 font-numeric">
+                    <span>{currentUserName}: {formatAmount(item.userPaid)}</span>
                     <span>•</span>
-                    <span>{partnerName}: ${item.partnerPaid.toFixed(2)}</span>
+                    <span>{partnerName}: {formatAmount(item.partnerPaid)}</span>
                   </div>
                 </div>
               </div>
