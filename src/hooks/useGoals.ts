@@ -47,7 +47,7 @@ export function useGoals() {
           deadline: row.deadline || '',
           userContribution: Number(row.user_contribution || 0),
           partnerContribution: Number(row.partner_contribution || 0),
-          isCompleted: row.is_completed || Number(row.current_amount) >= Number(row.target_amount),
+          isCompleted: Boolean(row.is_completed) || Number(row.current_amount) >= Number(row.target_amount),
         }));
         setGoals(mapped);
       }
@@ -106,16 +106,30 @@ export function useGoals() {
   }): Promise<boolean> => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user || !coupleId) throw new Error('Usuario o espacio no vinculado');
+      if (!user) throw new Error('Usuario no autenticado');
+
+      let currentCoupleId = coupleId;
+      if (!currentCoupleId) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('couple_id')
+          .eq('id', user.id)
+          .maybeSingle();
+        currentCoupleId = profile?.couple_id || null;
+      }
+
+      if (!currentCoupleId) {
+        throw new Error('No tienes un espacio de pareja vinculado.');
+      }
 
       const newRow = {
-        couple_id: coupleId,
+        couple_id: currentCoupleId,
         user_id: user.id,
         title: newGoalData.title.trim(),
-        category: newGoalData.category,
-        target_amount: newGoalData.targetAmount,
+        category: newGoalData.category || 'General',
+        target_amount: Number(newGoalData.targetAmount),
         current_amount: 0,
-        deadline: newGoalData.deadline || null,
+        deadline: newGoalData.deadline && newGoalData.deadline.trim() !== '' ? newGoalData.deadline : null,
         user_contribution: 0,
         partner_contribution: 0,
         is_completed: false,
@@ -127,7 +141,10 @@ export function useGoals() {
         .select()
         .single();
 
-      if (insertError) throw insertError;
+      if (insertError) {
+        console.error('Detalle error Supabase Goals:', insertError);
+        throw insertError;
+      }
 
       if (data) {
         const formatted: Goal = {
@@ -139,13 +156,15 @@ export function useGoals() {
           deadline: data.deadline || '',
           userContribution: Number(data.user_contribution || 0),
           partnerContribution: Number(data.partner_contribution || 0),
-          isCompleted: data.is_completed,
+          isCompleted: Boolean(data.is_completed),
         };
         setGoals((prev) => [formatted, ...prev]);
       }
       return true;
-    } catch (err) {
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Error al guardar la meta';
       console.error('Error adding goal:', err);
+      alert(`No se pudo guardar la meta: ${msg}`);
       return false;
     }
   };
@@ -160,12 +179,13 @@ export function useGoals() {
       const targetGoal = goals.find((g) => g.id === goalId);
       if (!targetGoal) throw new Error('Meta no encontrada');
 
-      const updatedCurrent = targetGoal.currentAmount + amount;
+      const numAmount = Number(amount);
+      const updatedCurrent = targetGoal.currentAmount + numAmount;
       const updatedUserContrib = isCurrentUserDeposit
-        ? targetGoal.userContribution + amount
+        ? targetGoal.userContribution + numAmount
         : targetGoal.userContribution;
       const updatedPartnerContrib = !isCurrentUserDeposit
-        ? targetGoal.partnerContribution + amount
+        ? targetGoal.partnerContribution + numAmount
         : targetGoal.partnerContribution;
       const isCompleted = updatedCurrent >= targetGoal.targetAmount;
 
@@ -179,7 +199,10 @@ export function useGoals() {
         })
         .eq('id', goalId);
 
-      if (updateError) throw updateError;
+      if (updateError) {
+        console.error('Detalle error Supabase Deposit:', updateError);
+        throw updateError;
+      }
 
       setGoals((prev) =>
         prev.map((g) =>
@@ -196,8 +219,10 @@ export function useGoals() {
       );
 
       return { success: true, isNowCompleted: isCompleted };
-    } catch (err) {
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Error al realizar abono';
       console.error('Error depositing to goal:', err);
+      alert(`No se pudo realizar el abono: ${msg}`);
       return { success: false, isNowCompleted: false };
     }
   };
