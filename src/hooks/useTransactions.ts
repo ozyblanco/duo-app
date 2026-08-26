@@ -2,6 +2,11 @@ import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import type { Transaction } from '@/types';
 
+const isValidUUID = (id?: string | null): boolean => {
+  if (!id) return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+};
+
 export function useTransactions() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
@@ -45,7 +50,7 @@ export function useTransactions() {
         type: row.type || 'expense',
         ownership: row.ownership || 'joint',
         paidByUserId: row.paid_by_user_id,
-        categoryId: row.category_id,
+        categoryId: row.category_id || 'General',
         accountId: row.account_id,
         splitRatio: row.split_ratio || { userA: 50, userB: 50 },
         createdAt: row.created_at,
@@ -120,18 +125,21 @@ export function useTransactions() {
         throw new Error('No tienes un espacio de pareja vinculado.');
       }
 
+      // Validar que paid_by_user_id sea un UUID válido de Supabase
+      const finalPaidBy = isValidUUID(newTxData.paidByUserId) ? newTxData.paidByUserId : user.id;
+      const finalAccountId = isValidUUID(newTxData.accountId) ? newTxData.accountId : null;
       const createdAtVal = newTxData.createdAt || newTxData.date || new Date().toISOString();
 
       const newRow = {
         couple_id: currentCoupleId,
         title: newTxData.title,
-        amount: newTxData.amount,
+        amount: Number(newTxData.amount),
         currency: newTxData.currency || 'USD',
         type: newTxData.type || 'expense',
         ownership: newTxData.ownership || 'joint',
-        paid_by_user_id: newTxData.paidByUserId || user.id,
+        paid_by_user_id: finalPaidBy,
         category_id: newTxData.categoryId || 'General',
-        account_id: newTxData.accountId || null,
+        account_id: finalAccountId,
         split_ratio: newTxData.splitRatio || { userA: 50, userB: 50 },
         created_at: createdAtVal,
       };

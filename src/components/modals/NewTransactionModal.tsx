@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { X, DollarSign, Tag, User, CreditCard, PieChart, ArrowLeftRight, RefreshCw } from 'lucide-react';
-import { currentUser, partnerUser, mockAccounts } from '@/data/mockData';
+import { useCoupleProfiles } from '@/hooks/useCoupleProfiles';
+import { useAccounts } from '@/components/accounts/useAccounts';
 import { useExchangeRates } from '@/hooks/useExchangeRates';
 import type { SplitRatio } from '@/types';
 
@@ -15,26 +16,36 @@ interface NewTransactionModalProps {
     accountId?: string;
     currency?: string;
     splitRatio?: SplitRatio;
-    createdAt: string; // Marcador de fecha y hora exacta
+    createdAt: string;
   }) => void;
 }
 
 export function NewTransactionModal({ isOpen, onClose, onSubmit }: NewTransactionModalProps) {
+  const { currentUser, partner } = useCoupleProfiles();
+  const { accounts } = useAccounts();
   const { rates, isLoading, refetch } = useExchangeRates();
 
   const [title, setTitle] = useState('');
   const [amount, setAmount] = useState('');
-  const [paidByUserId, setPaidByUserId] = useState(currentUser.id);
+  const [selectedPayerId, setSelectedPayerId] = useState<string>('');
   const [category, setCategory] = useState('Comida');
-  const [accountId, setAccountId] = useState(mockAccounts[0]?.id || 'acc_1');
+  const [accountId, setAccountId] = useState<string>('');
   const [currency, setCurrency] = useState<'USD' | 'VES'>('USD');
   const [rateType, setRateType] = useState<'binance' | 'bcv'>('binance');
   const [splitType, setSplitType] = useState<'50/50' | '100_USER' | '100_PARTNER'>('50/50');
 
   if (!isOpen) return null;
 
+  const currentUserId = currentUser?.id || '';
+  const partnerId = partner?.id || '';
+  const currentUserName = currentUser?.name ? currentUser.name.split(' ')[0] : 'Tú';
+  const partnerName = partner?.name ? partner.name.split(' ')[0] : 'Pareja';
+
+  const activePayerId = selectedPayerId || currentUserId;
+  const activeAccountId = accountId || (accounts[0]?.id ?? '');
+
   const numericAmount = parseFloat(amount) || 0;
-  const activeRate = rateType === 'bcv' ? rates.bcvUsd : rates.binanceUsdt;
+  const activeRate = (rateType === 'bcv' ? rates.bcvUsd : rates.binanceUsdt) || 36.5;
 
   // Cálculo equivalente dinámico
   const equivalentCalculated =
@@ -60,24 +71,25 @@ export function NewTransactionModal({ isOpen, onClose, onSubmit }: NewTransactio
     }
 
     onSubmit({
-      title,
+      title: title.trim(),
       amount: finalAmountInUsd,
-      paidByUserId,
+      paidByUserId: activePayerId,
       category,
-      accountId,
+      accountId: activeAccountId || undefined,
       currency: 'USD',
       splitRatio,
-      createdAt: new Date().toISOString(), // Fecha y hora exacta en tiempo real
+      createdAt: new Date().toISOString(),
     });
 
-    // Reset de estado
+    // Reset
     setTitle('');
     setAmount('');
+    setSelectedPayerId('');
     onClose();
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm transition-opacity">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs transition-opacity">
       <div
         className="w-full max-w-md bg-white dark:bg-[#161B22] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl shadow-2xl p-6 transition-all"
         onClick={(e) => e.stopPropagation()}
@@ -108,11 +120,11 @@ export function NewTransactionModal({ isOpen, onClose, onSubmit }: NewTransactio
                 type="button"
                 onClick={refetch}
                 disabled={isLoading}
-                className="text-[10px] text-slate-400 hover:text-blue-400 flex items-center gap-1 transition-colors"
+                className="text-[10px] text-slate-400 hover:text-blue-400 flex items-center gap-1 transition-colors cursor-pointer"
                 title="Actualizar tasa"
               >
                 <RefreshCw className={`w-3 h-3 ${isLoading ? 'animate-spin text-blue-400' : ''}`} />
-                Tasa: Bs. {activeRate.toFixed(2)}
+                <span>Tasa: Bs. {activeRate.toFixed(2)}</span>
               </button>
             </div>
 
@@ -181,7 +193,7 @@ export function NewTransactionModal({ isOpen, onClose, onSubmit }: NewTransactio
 
             {currency === 'USD' && numericAmount > 0 && (
               <div className="mt-1.5 flex items-center justify-end gap-1 text-[11px] text-slate-500 dark:text-slate-400 font-medium">
-                <span>Equivale a aproximadamente</span>
+                <span>Equivale a aprox.</span>
                 <span className="font-bold text-slate-800 dark:text-slate-200">
                   Bs. {equivalentCalculated}
                 </span>
@@ -200,7 +212,7 @@ export function NewTransactionModal({ isOpen, onClose, onSubmit }: NewTransactio
               </div>
               <input
                 type="text"
-                placeholder="Ej. Mercado semanal en Farmatodo"
+                placeholder="Ej. Mercado semanal, Farmatodo, Cena..."
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 required
@@ -217,27 +229,27 @@ export function NewTransactionModal({ isOpen, onClose, onSubmit }: NewTransactio
             <div className="grid grid-cols-2 gap-2">
               <button
                 type="button"
-                onClick={() => setPaidByUserId(currentUser.id)}
+                onClick={() => setSelectedPayerId(currentUserId)}
                 className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl border text-xs font-semibold transition-all cursor-pointer ${
-                  paidByUserId === currentUser.id
-                    ? 'bg-blue-50 dark:bg-blue-500/10 border-blue-500/50 text-blue-600 dark:text-blue-400 shadow-sm'
+                  activePayerId === currentUserId
+                    ? 'bg-blue-50 dark:bg-blue-500/10 border-blue-500/50 text-blue-600 dark:text-blue-400 shadow-xs'
                     : 'bg-slate-50 dark:bg-[#0B0F17] border-slate-200/80 dark:border-slate-800 text-slate-600 dark:text-slate-400'
                 }`}
               >
                 <User className="w-3.5 h-3.5" />
-                <span>{currentUser.name}</span>
+                <span>{currentUserName}</span>
               </button>
               <button
                 type="button"
-                onClick={() => setPaidByUserId(partnerUser.id)}
+                onClick={() => setSelectedPayerId(partnerId)}
                 className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl border text-xs font-semibold transition-all cursor-pointer ${
-                  paidByUserId === partnerUser.id
-                    ? 'bg-pink-50 dark:bg-pink-500/10 border-pink-500/50 text-pink-600 dark:text-pink-400 shadow-sm'
+                  activePayerId === partnerId
+                    ? 'bg-pink-50 dark:bg-pink-500/10 border-pink-500/50 text-pink-600 dark:text-pink-400 shadow-xs'
                     : 'bg-slate-50 dark:bg-[#0B0F17] border-slate-200/80 dark:border-slate-800 text-slate-600 dark:text-slate-400'
                 }`}
               >
                 <User className="w-3.5 h-3.5" />
-                <span>{partnerUser.name}</span>
+                <span>{partnerName}</span>
               </button>
             </div>
           </div>
@@ -250,15 +262,19 @@ export function NewTransactionModal({ isOpen, onClose, onSubmit }: NewTransactio
                 <span>Cuenta</span>
               </label>
               <select
-                value={accountId}
+                value={activeAccountId}
                 onChange={(e) => setAccountId(e.target.value)}
                 className="w-full px-3 py-2.5 bg-slate-50 dark:bg-[#0B0F17] border border-slate-200/80 dark:border-slate-800 rounded-xl text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/30 cursor-pointer"
               >
-                {mockAccounts.map((acc) => (
-                  <option key={acc.id} value={acc.id}>
-                    {acc.name} ({acc.currency})
-                  </option>
-                ))}
+                {accounts.length === 0 ? (
+                  <option value="">General / Efectivo</option>
+                ) : (
+                  accounts.map((acc) => (
+                    <option key={acc.id} value={acc.id}>
+                      {acc.name} ({acc.currency})
+                    </option>
+                  ))
+                )}
               </select>
             </div>
 
@@ -293,7 +309,7 @@ export function NewTransactionModal({ isOpen, onClose, onSubmit }: NewTransactio
                 onClick={() => setSplitType('50/50')}
                 className={`py-1.5 text-[11px] font-bold rounded-lg transition-all cursor-pointer ${
                   splitType === '50/50'
-                    ? 'bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 shadow-sm'
+                    ? 'bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 shadow-xs'
                     : 'text-slate-500 dark:text-slate-400'
                 }`}
               >
@@ -304,27 +320,27 @@ export function NewTransactionModal({ isOpen, onClose, onSubmit }: NewTransactio
                 onClick={() => setSplitType('100_USER')}
                 className={`py-1.5 text-[11px] font-bold rounded-lg transition-all cursor-pointer ${
                   splitType === '100_USER'
-                    ? 'bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 shadow-sm'
+                    ? 'bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 shadow-xs'
                     : 'text-slate-500 dark:text-slate-400'
                 }`}
               >
-                Solo {currentUser.name.split(' ')[0]}
+                Solo {currentUserName}
               </button>
               <button
                 type="button"
                 onClick={() => setSplitType('100_PARTNER')}
                 className={`py-1.5 text-[11px] font-bold rounded-lg transition-all cursor-pointer ${
                   splitType === '100_PARTNER'
-                    ? 'bg-white dark:bg-slate-800 text-pink-600 dark:text-pink-400 shadow-sm'
+                    ? 'bg-white dark:bg-slate-800 text-pink-600 dark:text-pink-400 shadow-xs'
                     : 'text-slate-500 dark:text-slate-400'
                 }`}
               >
-                Solo {partnerUser.name.split(' ')[0]}
+                Solo {partnerName}
               </button>
             </div>
           </div>
 
-          {/* Botones de Acción */}
+          {/* Botones */}
           <div className="pt-3 flex items-center justify-end gap-3">
             <button
               type="button"
