@@ -83,7 +83,7 @@ function MainApp() {
     .filter((tx) => tx.paidByUserId === currentUserId)
     .reduce((acc, curr) => acc + curr.amount, 0);
 
-  const partnerPaidTotal = totalJointSpent - userPaidTotal;
+  const partnerPaidTotal = Math.max(0, totalJointSpent - userPaidTotal);
 
   const netBalance = transactions.reduce((acc, tx) => {
     if (tx.categoryId === 'Liquidación') return acc;
@@ -128,25 +128,33 @@ function MainApp() {
     splitRatio?: SplitRatio;
     createdAt?: string;
   }) => {
-    await addTransaction({
+    const payerId = data.paidByUserId || currentUserId;
+
+    const success = await addTransaction({
       title: data.title,
       amount: data.amount,
       currency: data.currency || 'USD',
       type: 'expense',
       ownership: 'joint',
-      paidByUserId: data.paidByUserId || currentUserId,
+      paidByUserId: payerId,
       categoryId: data.category,
-      accountId: data.accountId || 'acc_1',
+      accountId: data.accountId,
       splitRatio: data.splitRatio || { userA: 50, userB: 50 },
       createdAt: data.createdAt || new Date().toISOString(),
     });
 
-    const payerName = data.paidByUserId === currentUserId ? (currentUser?.name.split(' ')[0] || 'Tú') : (partner?.name.split(' ')[0] || 'Tu pareja');
-    addNotification({
-      title: 'Nuevo gasto registrado',
-      message: `${payerName} agregó "${data.title}" por $${data.amount.toFixed(2)} ${data.currency || 'USD'}`,
-      type: 'expense',
-    });
+    if (success) {
+      const isMe = payerId === currentUserId;
+      const payerName = isMe 
+        ? (currentUser?.name ? currentUser.name.split(' ')[0] : 'Tú') 
+        : (partner?.name ? partner.name.split(' ')[0] : 'Tu pareja');
+
+      addNotification({
+        title: 'Nuevo gasto registrado',
+        message: `${payerName} agregó "${data.title}" por $${data.amount.toFixed(2)} ${data.currency || 'USD'}`,
+        type: 'expense',
+      });
+    }
   };
 
   const handleSettleUp = async (settlementData: {
@@ -156,24 +164,27 @@ function MainApp() {
     category: string;
     createdAt: string;
   }) => {
-    await addTransaction({
+    const payerId = settlementData.paidByUserId || currentUserId;
+
+    const success = await addTransaction({
       title: settlementData.title,
       amount: settlementData.amount,
       currency: 'USD',
       type: 'expense',
       ownership: 'joint',
-      paidByUserId: settlementData.paidByUserId || currentUserId,
+      paidByUserId: payerId,
       categoryId: settlementData.category,
-      accountId: 'acc_1',
       splitRatio: { userA: 50, userB: 50 },
       createdAt: settlementData.createdAt,
     });
 
-    addNotification({
-      title: 'Saldos al día 🎉',
-      message: `Se liquidaron las cuentas pendientes por un total de $${settlementData.amount.toFixed(2)} USD.`,
-      type: 'settlement',
-    });
+    if (success) {
+      addNotification({
+        title: 'Saldos al día 🎉',
+        message: `Se liquidaron las cuentas pendientes por un total de $${settlementData.amount.toFixed(2)} USD.`,
+        type: 'settlement',
+      });
+    }
   };
 
   if (authLoading || (user && (checkingPartner || profilesLoading))) {

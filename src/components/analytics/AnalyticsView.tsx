@@ -10,21 +10,26 @@ import {
   CalendarDays
 } from 'lucide-react';
 import type { Transaction } from '@/types';
-import { currentUser, partnerUser, mockCategories } from '@/data/mockData';
+import { mockCategories } from '@/data/mockData';
+import { useCoupleProfiles } from '@/hooks/useCoupleProfiles';
 
 interface AnalyticsViewProps {
   transactions: Transaction[];
 }
 
-export function AnalyticsView({ transactions }: AnalyticsViewProps) {
-  // Función para obtener el nombre real de la categoría
-  const getCategoryName = (categoryId?: string) => {
-    if (!categoryId) return 'Otros';
-    const cat = mockCategories.find((c) => c.id === categoryId);
-    return cat ? cat.name : categoryId;
-  };
+function getCategoryName(categoryId?: string) {
+  if (!categoryId) return 'Otros';
+  const cat = mockCategories.find((c) => c.id === categoryId);
+  return cat ? cat.name : categoryId;
+}
 
-  // Filtrar únicamente gastos reales (excluyendo liquidaciones de saldo) sin usar explicit 'any'
+export function AnalyticsView({ transactions }: AnalyticsViewProps) {
+  const { currentUser, partner } = useCoupleProfiles();
+
+  const currentUserId = currentUser?.id;
+  const currentUserName = currentUser?.name ? currentUser.name.split(' ')[0] : 'Tú';
+  const partnerName = partner?.name ? partner.name.split(' ')[0] : 'Pareja';
+
   const expenseTransactions = useMemo(() => {
     return transactions.filter((tx) => {
       const txCategory = (tx as { category?: string }).category;
@@ -38,12 +43,13 @@ export function AnalyticsView({ transactions }: AnalyticsViewProps) {
   }, [expenseTransactions]);
 
   const userTotal = useMemo(() => {
+    if (!currentUserId) return 0;
     return expenseTransactions
-      .filter((t) => t.paidByUserId === currentUser.id)
+      .filter((t) => t.paidByUserId === currentUserId)
       .reduce((acc, t) => acc + t.amount, 0);
-  }, [expenseTransactions]);
+  }, [expenseTransactions, currentUserId]);
 
-  const partnerTotal = totalSpent - userTotal;
+  const partnerTotal = Math.max(0, totalSpent - userTotal);
 
   const categoryStats = useMemo(() => {
     const map = new Map<string, { categoryName: string; total: number; userPaid: number; partnerPaid: number; count: number }>();
@@ -52,7 +58,7 @@ export function AnalyticsView({ transactions }: AnalyticsViewProps) {
       const catId = tx.categoryId || 'otros';
       const categoryName = getCategoryName(tx.categoryId);
       const existing = map.get(catId) || { categoryName, total: 0, userPaid: 0, partnerPaid: 0, count: 0 };
-      const isUser = tx.paidByUserId === currentUser.id;
+      const isUser = currentUserId ? tx.paidByUserId === currentUserId : true;
 
       map.set(catId, {
         categoryName,
@@ -70,7 +76,7 @@ export function AnalyticsView({ transactions }: AnalyticsViewProps) {
         percentage: totalSpent > 0 ? Math.round((data.total / totalSpent) * 100) : 0,
       }))
       .sort((a, b) => b.total - a.total);
-  }, [expenseTransactions, totalSpent]);
+  }, [expenseTransactions, totalSpent, currentUserId]);
 
   const topCategory = categoryStats[0] || { categoryName: 'Ninguna', total: 0 };
   const dailyAverage = (totalSpent / 30).toFixed(2);
@@ -101,7 +107,7 @@ export function AnalyticsView({ transactions }: AnalyticsViewProps) {
             ${totalSpent.toFixed(2)} <span className="text-xs font-normal text-slate-400">USD</span>
           </p>
           <span className="text-[10px] text-emerald-500 font-bold flex items-center gap-0.5">
-            <TrendingUp className="w-3 h-3" /> Basado en {expenseTransactions.length} registros
+            <TrendingUp className="w-3.5 h-3.5" /> Basado en {expenseTransactions.length} registros
           </span>
         </div>
 
@@ -149,25 +155,25 @@ export function AnalyticsView({ transactions }: AnalyticsViewProps) {
             <div 
               className="h-full bg-blue-500 rounded-l-full transition-all duration-500"
               style={{ width: `${userPercentage}%` }}
-              title={`${currentUser.name}: ${userPercentage}%`}
+              title={`${currentUserName}: ${userPercentage}%`}
             />
             <div 
               className="h-full bg-pink-500 rounded-r-full transition-all duration-500"
               style={{ width: `${partnerPercentage}%` }}
-              title={`${partnerUser.name}: ${partnerPercentage}%`}
+              title={`${partnerName}: ${partnerPercentage}%`}
             />
           </div>
 
           <div className="flex items-center justify-between text-xs pt-1">
             <div className="flex items-center gap-2">
               <div className="w-2.5 h-2.5 rounded-full bg-blue-500" />
-              <span className="font-bold text-slate-800 dark:text-slate-200">{currentUser.name}</span>
+              <span className="font-bold text-slate-800 dark:text-slate-200">{currentUserName}</span>
               <span className="text-slate-400">(${userTotal.toFixed(2)} USD • {userPercentage}%)</span>
             </div>
 
             <div className="flex items-center gap-2">
               <span className="text-slate-400">(${partnerTotal.toFixed(2)} USD • {partnerPercentage}%)</span>
-              <span className="font-bold text-slate-800 dark:text-slate-200">{partnerUser.name}</span>
+              <span className="font-bold text-slate-800 dark:text-slate-200">{partnerName}</span>
               <div className="w-2.5 h-2.5 rounded-full bg-pink-500" />
             </div>
           </div>
@@ -187,38 +193,42 @@ export function AnalyticsView({ transactions }: AnalyticsViewProps) {
         </div>
 
         <div className="space-y-4">
-          {categoryStats.map((item) => (
-            <div key={item.catId} className="space-y-1.5">
-              <div className="flex items-center justify-between text-xs font-semibold">
-                <span className="text-slate-800 dark:text-slate-200 flex items-center gap-1.5 font-bold">
-                  <ShoppingBag className="w-3.5 h-3.5 text-slate-400" />
-                  {item.categoryName}
-                </span>
-                <div className="flex items-center gap-2">
-                  <span className="text-slate-400">{item.count} transacciones</span>
-                  <span className="text-slate-900 dark:text-white font-extrabold">
-                    ${item.total.toFixed(2)} USD
+          {categoryStats.length === 0 ? (
+            <p className="text-xs text-slate-400 text-center py-4">No hay gastos registrados aún.</p>
+          ) : (
+            categoryStats.map((item) => (
+              <div key={item.catId} className="space-y-1.5">
+                <div className="flex items-center justify-between text-xs font-semibold">
+                  <span className="text-slate-800 dark:text-slate-200 flex items-center gap-1.5 font-bold">
+                    <ShoppingBag className="w-3.5 h-3.5 text-slate-400" />
+                    {item.categoryName}
                   </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-slate-400">{item.count} transacciones</span>
+                    <span className="text-slate-900 dark:text-white font-extrabold">
+                      ${item.total.toFixed(2)} USD
+                    </span>
+                  </div>
+                </div>
+
+                <div className="h-2 w-full bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                  <div 
+                    className="h-full bg-indigo-500 dark:bg-indigo-400 rounded-full transition-all duration-500"
+                    style={{ width: `${item.percentage}%` }}
+                  />
+                </div>
+
+                <div className="flex items-center justify-between text-[10px] text-slate-400 pt-0.5">
+                  <span>{item.percentage}% del total</span>
+                  <div className="flex items-center gap-3">
+                    <span>{currentUserName}: ${item.userPaid.toFixed(2)}</span>
+                    <span>•</span>
+                    <span>{partnerName}: ${item.partnerPaid.toFixed(2)}</span>
+                  </div>
                 </div>
               </div>
-
-              <div className="h-2 w-full bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
-                <div 
-                  className="h-full bg-indigo-500 dark:bg-indigo-400 rounded-full transition-all duration-500"
-                  style={{ width: `${item.percentage}%` }}
-                />
-              </div>
-
-              <div className="flex items-center justify-between text-[10px] text-slate-400 pt-0.5">
-                <span>{item.percentage}% del presupuesto total</span>
-                <div className="flex items-center gap-3">
-                  <span>{currentUser.name}: ${item.userPaid.toFixed(2)}</span>
-                  <span>•</span>
-                  <span>{partnerUser.name}: ${item.partnerPaid.toFixed(2)}</span>
-                </div>
-              </div>
-            </div>
-          ))}
+            ))
+          )}
         </div>
       </div>
     </div>

@@ -8,7 +8,6 @@ export function useTransactions() {
   const [error, setError] = useState<string | null>(null);
   const [coupleId, setCoupleId] = useState<string | null>(null);
 
-  // 1. Obtención asíncrona de datos desde Supabase
   const fetchTransactions = useCallback(async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -47,7 +46,7 @@ export function useTransactions() {
         ownership: row.ownership || 'joint',
         paidByUserId: row.paid_by_user_id,
         categoryId: row.category_id,
-        accountId: row.account_id || 'acc_1',
+        accountId: row.account_id,
         splitRatio: row.split_ratio || { userA: 50, userB: 50 },
         createdAt: row.created_at,
         date: row.created_at,
@@ -57,31 +56,25 @@ export function useTransactions() {
       setError(null);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Error al cargar transacciones.';
-      console.error('Error fetching transactions:', msg);
+      console.error('Error fetching transactions:', err);
       setError(msg);
     } finally {
       setLoading(false);
     }
   }, []);
 
-  // 2. Carga inicial asíncrona respetando el ciclo de vida de React
   useEffect(() => {
     let isMounted = true;
-
     const executeFetch = async () => {
-      if (isMounted) {
-        await fetchTransactions();
-      }
+      if (isMounted) await fetchTransactions();
     };
-
     executeFetch();
-
     return () => {
       isMounted = false;
     };
   }, [fetchTransactions]);
 
-  // 3. Suscripción en Tiempo Real (Realtime)
+  // Suscripción Realtime
   useEffect(() => {
     if (!coupleId) return;
 
@@ -106,10 +99,9 @@ export function useTransactions() {
     };
   }, [coupleId, fetchTransactions]);
 
-  // 4. Registrar Transacción
   const addTransaction = async (
     newTxData: Omit<Transaction, 'id' | 'date'> & { createdAt?: string; date?: string }
-  ) => {
+  ): Promise<boolean> => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Usuario no autenticado');
@@ -138,8 +130,8 @@ export function useTransactions() {
         type: newTxData.type || 'expense',
         ownership: newTxData.ownership || 'joint',
         paid_by_user_id: newTxData.paidByUserId || user.id,
-        category_id: newTxData.categoryId,
-        account_id: newTxData.accountId || 'acc_1',
+        category_id: newTxData.categoryId || 'General',
+        account_id: newTxData.accountId || null,
         split_ratio: newTxData.splitRatio || { userA: 50, userB: 50 },
         created_at: createdAtVal,
       };
@@ -150,7 +142,10 @@ export function useTransactions() {
         .select()
         .single();
 
-      if (insertError) throw insertError;
+      if (insertError) {
+        console.error('Detalle error Supabase:', insertError);
+        throw insertError;
+      }
 
       const formatted: Transaction = {
         id: data.id,
@@ -168,14 +163,15 @@ export function useTransactions() {
       };
 
       setTransactions((prev) => [formatted, ...prev]);
+      return true;
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Error al guardar la transacción.';
-      console.error('Error adding transaction:', msg);
-      alert(`No se pudo guardar la transacción: ${msg}`);
+      console.error('Error adding transaction:', err);
+      alert(`No se pudo guardar: ${msg}`);
+      return false;
     }
   };
 
-  // 5. Eliminar Transacción
   const deleteTransaction = async (id: string) => {
     try {
       const { error: delError } = await supabase
@@ -184,16 +180,10 @@ export function useTransactions() {
         .eq('id', id);
 
       if (delError) throw delError;
-
       setTransactions((prev) => prev.filter((tx) => tx.id !== id));
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Error al eliminar transacción.';
-      console.error('Error deleting transaction:', msg);
+      console.error('Error deleting transaction:', err);
     }
-  };
-
-  const resetTransactions = () => {
-    setTransactions([]);
   };
 
   return {
@@ -202,7 +192,6 @@ export function useTransactions() {
     error,
     addTransaction,
     deleteTransaction,
-    resetTransactions,
     refreshTransactions: fetchTransactions,
   };
 }
