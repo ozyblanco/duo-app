@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import type { ExchangeRates } from '@/types';
 
 interface DolarApiResponseItem {
@@ -27,12 +27,16 @@ export function useExchangeRates() {
           fetch('https://criptoya.com/api/binancep2p/usdt/ves/1').catch(() => null),
         ]);
 
-        if (resDolares.ok && isMounted) {
+        if (!resDolares.ok) {
+          throw new Error('No se pudo obtener la tasa de cambio oficial.');
+        }
+
+        if (isMounted) {
           const dataDolares: DolarApiResponseItem[] = await resDolares.json();
           const oficial = dataDolares.find((d) => d.fuente === 'oficial')?.promedio || 36.50;
           let paralelo = dataDolares.find((d) => d.fuente === 'paralelo')?.promedio || 38.20;
 
-          // Extrae el precio 'ask' (tasa real de compra de USDT en Binance P2P)
+          // Extrae el precio 'ask' (tasa de venta/compra real P2P Binance)
           if (resBinanceP2P && resBinanceP2P.ok) {
             const dataP2P = await resBinanceP2P.json();
             if (dataP2P?.ask) {
@@ -85,15 +89,18 @@ export function useExchangeRates() {
     };
   }, [reloadTrigger]);
 
-  const refetch = () => {
+  const refetch = useCallback(() => {
     setIsLoading(true);
     setReloadTrigger((prev) => prev + 1);
-  };
+  }, []);
 
-  const convertUsdToVes = (amountInUsd: number, rateType: 'bcv' | 'binance' = 'binance') => {
-    const rate = rateType === 'bcv' ? rates.bcvUsd : rates.binanceUsdt;
-    return amountInUsd * rate;
-  };
+  const convertUsdToVes = useCallback(
+    (amountInUsd: number, rateType: 'bcv' | 'binance' = 'binance') => {
+      const rate = rateType === 'bcv' ? rates.bcvUsd : rates.binanceUsdt;
+      return amountInUsd * rate;
+    },
+    [rates.bcvUsd, rates.binanceUsdt]
+  );
 
   return { rates, isLoading, convertUsdToVes, refetch };
 }

@@ -13,6 +13,7 @@ export interface Account {
   currency: string;
   icon?: string;
   ownerId?: string;
+  isDeleted?: boolean;
 }
 
 export interface Category {

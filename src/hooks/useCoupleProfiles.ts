@@ -11,6 +11,7 @@ export interface UserProfile {
 export function useCoupleProfiles() {
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   const [partner, setPartner] = useState<UserProfile | null>(null);
+  const [coupleCode, setCoupleCode] = useState<string>('DUO-8842');
   const [loading, setLoading] = useState(true);
 
   const fetchProfiles = useCallback(async () => {
@@ -22,7 +23,6 @@ export function useCoupleProfiles() {
         return;
       }
 
-      // 1. Obtener el perfil del usuario actual
       const { data: myProfile, error: myProfileErr } = await supabase
         .from('profiles')
         .select('*')
@@ -41,8 +41,10 @@ export function useCoupleProfiles() {
       };
       setCurrentUser(formattedMe);
 
-      // 2. Si tiene un couple_id, obtener el perfil de la pareja
       if (myProfile.couple_id) {
+        const formattedCode = `DUO-${myProfile.couple_id.slice(0, 4).toUpperCase()}`;
+        setCoupleCode(formattedCode);
+
         const { data: partnerData } = await supabase
           .from('profiles')
           .select('*')
@@ -85,6 +87,7 @@ export function useCoupleProfiles() {
   return {
     currentUser,
     partner,
+    coupleCode,
     loading,
     refreshProfiles: fetchProfiles,
   };

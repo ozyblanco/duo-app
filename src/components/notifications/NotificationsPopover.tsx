@@ -1,40 +1,19 @@
 import { useState, useRef, useEffect } from 'react';
 import { Bell, CheckCheck, Trash2, ArrowRightLeft, Target, AlertCircle } from 'lucide-react';
 import type { Notification } from '@/types';
-
-const mockNotifications: Notification[] = [
-  {
-    id: '1',
-    title: 'Nuevo gasto registrado',
-    message: 'Se agregó "Supermercado El Plazas" por $45.00',
-    timestamp: 'Hace 10 min',
-    read: false,
-    type: 'expense',
-  },
-  {
-    id: '2',
-    title: 'Meta alcanzada',
-    message: 'Completaron el 80% de la meta "Fondo de Emergencia"',
-    timestamp: 'Hace 2 horas',
-    read: false,
-    type: 'goal',
-  },
-  {
-    id: '3',
-    title: 'Saldos actualizados',
-    message: 'Se liquidó la cuenta pendiente del mes anterior',
-    timestamp: 'Ayer',
-    read: true,
-    type: 'settlement',
-  },
-];
+import { useNotifications } from '@/hooks/useNotifications';
 
 export function NotificationsPopover() {
   const [isOpen, setIsOpen] = useState(false);
-  const [notifications, setNotifications] = useState<Notification[]>(mockNotifications);
   const popoverRef = useRef<HTMLDivElement>(null);
 
-  const unreadCount = notifications.filter((n) => !n.read).length;
+  const {
+    notifications,
+    unreadCount,
+    markAllAsRead,
+    markAsRead,
+    deleteNotification,
+  } = useNotifications();
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -46,17 +25,9 @@ export function NotificationsPopover() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const markAllAsRead = () => {
-    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
-  };
-
-  const markAsRead = (id: string) => {
-    setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)));
-  };
-
-  const deleteNotification = (id: string, e: React.MouseEvent) => {
+  const handleDelete = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    setNotifications((prev) => prev.filter((n) => n.id !== id));
+    deleteNotification(id);
   };
 
   const getIcon = (type: Notification['type']) => {
@@ -138,7 +109,7 @@ export function NotificationsPopover() {
                     </p>
                   </div>
                   <button
-                    onClick={(e) => deleteNotification(n.id, e)}
+                    onClick={(e) => handleDelete(n.id, e)}
                     className="text-slate-300 hover:text-rose-500 dark:text-slate-600 dark:hover:text-rose-400 p-1 transition-colors"
                   >
                     <Trash2 className="w-3.5 h-3.5" />

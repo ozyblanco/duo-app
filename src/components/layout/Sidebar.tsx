@@ -10,7 +10,8 @@ import {
   ChevronDown
 } from 'lucide-react';
 import { useTheme } from '@/hooks/useTheme';
-import { currentUser, partnerUser } from '@/data/mockData';
+import { useCoupleProfiles } from '@/hooks/useCoupleProfiles';
+import { useAuth } from '@/hooks/useAuth';
 
 interface SidebarProps {
   activeTab: string;
@@ -19,6 +20,8 @@ interface SidebarProps {
 
 export function Sidebar({ activeTab, onTabChange }: SidebarProps) {
   const { theme } = useTheme();
+  const { currentUser, partner } = useCoupleProfiles();
+  const { signOut } = useAuth();
 
   const menuItems = [
     { id: 'dashboard', label: 'Inicio', icon: LayoutDashboard },
@@ -29,10 +32,22 @@ export function Sidebar({ activeTab, onTabChange }: SidebarProps) {
     { id: 'profile', label: 'Ajustes Pareja', icon: Users },
   ];
 
+  const currentFirstName = currentUser?.name ? currentUser.name.split(' ')[0] : 'Usuario';
+  const partnerFirstName = partner?.name ? partner.name.split(' ')[0] : 'Pareja';
+
+  const userInitial = currentUser?.name ? currentUser.name[0].toUpperCase() : 'U';
+  const partnerInitial = partner?.name ? partner.name[0].toUpperCase() : 'P';
+
+  const handleSignOut = async () => {
+    if (confirm('¿Estás seguro de que deseas cerrar sesión?')) {
+      await signOut();
+    }
+  };
+
   return (
     <aside className="w-64 border-r border-slate-200/80 dark:border-slate-800/80 bg-white dark:bg-[#0B0F17] flex flex-col justify-between p-5 h-full select-none transition-colors shrink-0">
       <div className="space-y-6">
-        {/* Contenedor del Logo PNG */}
+        {/* Logo */}
         <div className="px-1 py-1 h-9 flex items-center">
           <img
             src={theme === 'dark' ? '/logos/duologoyisotipoblanco.png' : '/logos/duologoconisotipo.png'}
@@ -41,25 +56,25 @@ export function Sidebar({ activeTab, onTabChange }: SidebarProps) {
           />
         </div>
 
-        {/* Indicador / Selector de Pareja */}
+        {/* Indicador de Pareja Dinámico */}
         <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-100/80 dark:bg-slate-800/50 border border-slate-200/60 dark:border-slate-700/60">
-          <div className="flex items-center gap-2.5">
-            <div className="flex -space-x-1.5 overflow-hidden">
-              <div className="h-6 w-6 rounded-full ring-2 ring-white dark:ring-[#0B0F17] bg-[#3B82F6] text-[10px] flex items-center justify-center font-bold text-white shrink-0">
-                {currentUser.name[0]}
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="flex -space-x-1.5 overflow-hidden shrink-0">
+              <div className="h-6 w-6 rounded-full ring-2 ring-white dark:ring-[#0B0F17] bg-[#3B82F6] text-[10px] flex items-center justify-center font-bold text-white uppercase">
+                {userInitial}
               </div>
-              <div className="h-6 w-6 rounded-full ring-2 ring-white dark:ring-[#0B0F17] bg-[#FF6B9D] text-[10px] flex items-center justify-center font-bold text-white shrink-0">
-                {partnerUser.name[0]}
+              <div className="h-6 w-6 rounded-full ring-2 ring-white dark:ring-[#0B0F17] bg-[#FF6B9D] text-[10px] flex items-center justify-center font-bold text-white uppercase">
+                {partnerInitial}
               </div>
             </div>
-            <span className="text-xs font-semibold text-slate-800 dark:text-slate-200">
-              {currentUser.name} & Pareja
+            <span className="text-xs font-semibold text-slate-800 dark:text-slate-200 truncate">
+              {currentFirstName} & {partnerFirstName}
             </span>
           </div>
-          <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+          <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
         </div>
 
-        {/* Navegación Principal Expandida */}
+        {/* Navegación */}
         <nav className="space-y-1">
           {menuItems.map((item) => {
             const Icon = item.icon;
@@ -67,8 +82,9 @@ export function Sidebar({ activeTab, onTabChange }: SidebarProps) {
             return (
               <button
                 key={item.id}
+                type="button"
                 onClick={() => onTabChange(item.id)}
-                className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${
+                className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
                   isActive
                     ? 'bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 font-bold'
                     : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100/80 dark:hover:bg-slate-800/60 hover:text-slate-900 dark:hover:text-white'
@@ -85,8 +101,9 @@ export function Sidebar({ activeTab, onTabChange }: SidebarProps) {
       {/* Pie con Configuración y Cerrar Sesión */}
       <div className="pt-4 border-t border-slate-200/80 dark:border-slate-800/80 space-y-1">
         <button 
+          type="button"
           onClick={() => onTabChange('settings')}
-          className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${
+          className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
             activeTab === 'settings'
               ? 'bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 font-bold'
               : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100/80 dark:hover:bg-slate-800/60 hover:text-slate-900 dark:hover:text-white'
@@ -97,7 +114,9 @@ export function Sidebar({ activeTab, onTabChange }: SidebarProps) {
         </button>
 
         <button 
-          className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100/80 dark:hover:bg-slate-800/60 hover:text-rose-600 dark:hover:text-rose-400 transition-all"
+          type="button"
+          onClick={handleSignOut}
+          className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100/80 dark:hover:bg-slate-800/60 hover:text-rose-600 dark:hover:text-rose-400 transition-all cursor-pointer"
         >
           <LogOut className="w-4 h-4 text-slate-400" />
           <span>Cerrar sesión</span>

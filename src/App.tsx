@@ -1,9 +1,12 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Loader2 } from 'lucide-react';
 import { supabase } from './lib/supabase';
 import { useAuth } from './hooks/useAuth';
 import { useTransactions } from './hooks/useTransactions';
 import { useCoupleProfiles } from './hooks/useCoupleProfiles';
+import { NotificationProvider } from './context/NotificationContext';
+import { CurrencyProvider } from './context/CurrencyContext';
+import { useNotifications } from './hooks/useNotifications';
 import { AppLayout } from './components/layout/AppLayout';
 import { BalanceOverview } from './components/dashboard/BalanceOverview';
 import { MonthlyAnalytics } from './components/dashboard/MonthlyAnalytics';
@@ -22,17 +25,21 @@ import { AuthView } from './components/auth/AuthView';
 import { PartnerConnectView } from './components/auth/PartnerConnectView';
 import type { SplitRatio } from './types';
 
-export default function App() {
+function MainApp() {
   const { user, loading: authLoading } = useAuth();
   const { transactions, addTransaction } = useTransactions();
-  const { currentUser, loading: profilesLoading } = useCoupleProfiles();
-  
+  const { currentUser, partner, loading: profilesLoading } = useCoupleProfiles();
+  const { addNotification } = useNotifications();
+
   const [isPartnerConnected, setIsPartnerConnected] = useState(false);
   const [checkingPartner, setCheckingPartner] = useState(true);
 
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSettleModalOpen, setIsSettleModalOpen] = useState(false);
+
+  const partnerNotifiedRef = useRef(false);
+  const budgetNotifiedRef = useRef(false);
 
   useEffect(() => {
     async function checkPartnerStatus() {
@@ -51,6 +58,9 @@ export default function App() {
 
         if (!error && profile?.couple_id) {
           setIsPartnerConnected(true);
+          if (!partnerNotifiedRef.current) {
+            partnerNotifiedRef.current = true;
+          }
         } else {
           setIsPartnerConnected(false);
         }
@@ -68,7 +78,7 @@ export default function App() {
   const currentUserId = currentUser?.id || user?.id || '';
 
   const totalJointSpent = transactions.reduce((acc, curr) => acc + curr.amount, 0);
-  
+
   const userPaidTotal = transactions
     .filter((tx) => tx.paidByUserId === currentUserId)
     .reduce((acc, curr) => acc + curr.amount, 0);
@@ -88,7 +98,27 @@ export default function App() {
     }
   }, 0);
 
-  const handleAddTransaction = (data: {
+  useEffect(() => {
+    try {
+      const savedSettings = localStorage.getItem('duo_couple_settings');
+      if (savedSettings && totalJointSpent > 0) {
+        const { budget } = JSON.parse(savedSettings);
+        const numBudget = Number(budget);
+        if (numBudget > 0 && totalJointSpent > numBudget && !budgetNotifiedRef.current) {
+          budgetNotifiedRef.current = true;
+          addNotification({
+            title: '⚠️ Límite de Presupuesto Excedido',
+            message: `El gasto acumulado ($${totalJointSpent.toFixed(2)}) ha superado el presupuesto fijado de $${numBudget.toFixed(2)}.`,
+            type: 'system',
+          });
+        }
+      }
+    } catch (e) {
+      console.error('Error verificando presupuesto:', e);
+    }
+  }, [totalJointSpent, addNotification]);
+
+  const handleAddTransaction = async (data: {
     title: string;
     amount: number;
     paidByUserId: string;
@@ -98,7 +128,7 @@ export default function App() {
     splitRatio?: SplitRatio;
     createdAt?: string;
   }) => {
-    addTransaction({
+    await addTransaction({
       title: data.title,
       amount: data.amount,
       currency: data.currency || 'USD',
@@ -110,16 +140,23 @@ export default function App() {
       splitRatio: data.splitRatio || { userA: 50, userB: 50 },
       createdAt: data.createdAt || new Date().toISOString(),
     });
+
+    const payerName = data.paidByUserId === currentUserId ? (currentUser?.name.split(' ')[0] || 'Tú') : (partner?.name.split(' ')[0] || 'Tu pareja');
+    addNotification({
+      title: 'Nuevo gasto registrado',
+      message: `${payerName} agregó "${data.title}" por $${data.amount.toFixed(2)} ${data.currency || 'USD'}`,
+      type: 'expense',
+    });
   };
 
-  const handleSettleUp = (settlementData: {
+  const handleSettleUp = async (settlementData: {
     title: string;
     amount: number;
     paidByUserId: string;
     category: string;
     createdAt: string;
   }) => {
-    addTransaction({
+    await addTransaction({
       title: settlementData.title,
       amount: settlementData.amount,
       currency: 'USD',
@@ -130,6 +167,12 @@ export default function App() {
       accountId: 'acc_1',
       splitRatio: { userA: 50, userB: 50 },
       createdAt: settlementData.createdAt,
+    });
+
+    addNotification({
+      title: 'Saldos al día 🎉',
+      message: `Se liquidaron las cuentas pendientes por un total de $${settlementData.amount.toFixed(2)} USD.`,
+      type: 'settlement',
     });
   };
 
@@ -151,7 +194,14 @@ export default function App() {
   if (!isPartnerConnected) {
     return (
       <PartnerConnectView 
-        onComplete={() => setIsPartnerConnected(true)} 
+        onComplete={() => {
+          setIsPartnerConnected(true);
+          addNotification({
+            title: '¡Pareja Vinculada con Éxito!',
+            message: 'Ahora ambos perfiles están sincronizados en tiempo real.',
+            type: 'system',
+          });
+        }} 
       />
     );
   }
@@ -209,7 +259,6 @@ export default function App() {
         onSubmit={handleAddTransaction}
       />
 
-      {/* Aquí el error desaparecerá al arreglar la interfaz en SettleUpModal.tsx */}
       <SettleUpModal
         isOpen={isSettleModalOpen}
         onClose={() => setIsSettleModalOpen(false)}
@@ -217,5 +266,15 @@ export default function App() {
         onSubmit={handleSettleUp}
       />
     </AppLayout>
+  );
+}
+
+export default function App() {
+  return (
+    <NotificationProvider>
+      <CurrencyProvider>
+        <MainApp />
+      </CurrencyProvider>
+    </NotificationProvider>
   );
 }
