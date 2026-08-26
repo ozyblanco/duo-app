@@ -243,7 +243,8 @@ function MainApp() {
             onViewAll={() => setActiveTab('transactions')}
             onNewTransaction={() => setIsModalOpen(true)}
           />
-          <MonthlyAnalytics />
+          {/* Aquí pasamos las transacciones reales */}
+          <MonthlyAnalytics transactions={transactions} />
         </div>
       )}
 
