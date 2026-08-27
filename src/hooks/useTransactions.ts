@@ -21,18 +21,21 @@ export function useTransactions() {
     }
   });
 
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState<boolean>(() => {
+    return typeof navigator !== 'undefined' ? navigator.onLine : true;
+  });
   const [error, setError] = useState<string | null>(null);
   const [coupleId, setCoupleId] = useState<string | null>(null);
 
   const fetchTransactions = useCallback(async () => {
-    try {
-      if (!navigator.onLine) {
-        setLoading(false);
-        return;
-      }
+    if (!navigator.onLine) {
+      setLoading(false);
+      return;
+    }
 
-      const { data: { user } } = await supabase.auth.getUser();
+    try {
+      const { data: authData } = await supabase.auth.getUser();
+      const user = authData?.user;
       if (!user) {
         setTransactions([]);
         return;
@@ -51,7 +54,7 @@ export function useTransactions() {
 
       setCoupleId(profile.couple_id);
 
-      // Sincronizar cola offline si existen elementos pendientes
+      // Sincronizar cola acumulada en modo offline
       await offlineQueue.syncAll(profile.couple_id);
 
       const { data, error: txError } = await supabase
@@ -92,22 +95,27 @@ export function useTransactions() {
 
   useEffect(() => {
     let isMounted = true;
-    const executeFetch = async () => {
-      if (isMounted) await fetchTransactions();
+
+    const loadInitialData = async () => {
+      if (isMounted) {
+        await fetchTransactions();
+      }
     };
-    executeFetch();
+
+    loadInitialData();
+
     return () => {
       isMounted = false;
     };
   }, [fetchTransactions]);
 
-  // Suscripción Realtime con identificador único por instancia
+  // Suscripción Realtime aislada por instancia
   useEffect(() => {
     if (!coupleId || !navigator.onLine) return;
 
-    const channelId = `realtime-tx-${coupleId}-${Math.random().toString(36).substring(2, 7)}`;
+    const channelName = `ch_tx_${coupleId}_${Math.random().toString(36).substring(2, 9)}`;
     const channel = supabase
-      .channel(channelId)
+      .channel(channelName)
       .on(
         'postgres_changes',
         {
@@ -127,7 +135,7 @@ export function useTransactions() {
     };
   }, [coupleId, fetchTransactions]);
 
-  // Agregar Gasto
+  // Registrar Gasto
   const addTransaction = async (
     newTxData: Omit<Transaction, 'id' | 'date'> & { createdAt?: string; date?: string; receiptUrl?: string }
   ): Promise<boolean> => {
@@ -226,13 +234,13 @@ export function useTransactions() {
       });
       return true;
     } catch (err: unknown) {
-      console.error('Error adding transaction online, fallback offline:', err);
+      console.error('Error al guardar movimiento online, respaldo en cola:', err);
       offlineQueue.add({ ...newTxData, createdAt: createdAtVal });
       return true;
     }
   };
 
-  // Editar / Actualizar Gasto
+  // Actualizar / Editar Gasto
   const updateTransaction = async (
     id: string,
     updatedFields: Partial<Omit<Transaction, 'id'>>
@@ -273,8 +281,7 @@ export function useTransactions() {
 
       return true;
     } catch (err: unknown) {
-      console.error('Error updating transaction:', err);
-      alert('No se pudo actualizar el movimiento');
+      console.error('Error al actualizar transacción:', err);
       return false;
     }
   };
@@ -300,7 +307,7 @@ export function useTransactions() {
       });
       return true;
     } catch (err: unknown) {
-      console.error('Error deleting transaction:', err);
+      console.error('Error al eliminar transacción:', err);
       return false;
     }
   };

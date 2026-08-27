@@ -7,11 +7,11 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.png', 'apple-touch-icon.png', 'logos/*.png'],
+      includeAssets: ['favicon.png', 'apple-touch-icon.png'],
       manifest: {
         name: 'DUO - Finanzas en Pareja',
         short_name: 'DUO',
-        description: 'Control financiero compartido y metas de ahorro en pareja',
+        description: 'Control financiero compartido en pareja',
         theme_color: '#0D1117',
         background_color: '#0D1117',
         display: 'standalone',
@@ -19,36 +19,31 @@ export default defineConfig({
         icons: [
           {
             src: '/favicon.png',
-            sizes: '192x192',
+            sizes: '32x32 64x64',
             type: 'image/png',
           },
           {
             src: '/apple-touch-icon.png',
-            sizes: '512x512',
-            type: 'image/png',
-          },
-          {
-            src: '/apple-touch-icon.png',
-            sizes: '512x512',
+            sizes: '180x180 512x512',
             type: 'image/png',
             purpose: 'any maskable',
           },
         ],
       },
       workbox: {
+        cleanupOutdatedCaches: true,
+        clientsClaim: true,
+        skipWaiting: true,
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/.*\.supabase\.co\/.*/i,
             handler: 'NetworkFirst',
             options: {
-              cacheName: 'supabase-api-cache',
+              cacheName: 'supabase-cache',
               expiration: {
-                maxEntries: 100,
-                maxAgeSeconds: 60 * 60 * 24, // 24 horas
-              },
-              cacheableResponse: {
-                statuses: [0, 200],
+                maxEntries: 50,
+                maxAgeSeconds: 86400,
               },
             },
           },
