@@ -58,6 +58,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     setNotifications((prev) => prev.filter((n) => n.id !== id));
   }, []);
 
+  // Agregar notificación interna + disparar notificación nativa al sistema operativo
   const addNotification = useCallback((newNotif: Omit<Notification, 'id' | 'timestamp' | 'read'>) => {
     const item: Notification = {
       ...newNotif,
@@ -65,7 +66,31 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
       timestamp: 'Ahora mismo',
       read: false,
     };
+
     setNotifications((prev) => [item, ...prev]);
+
+    // Disparo nativo Web Push / OS Notification
+    if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+      try {
+        if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+          navigator.serviceWorker.ready.then((registration) => {
+            registration.showNotification(newNotif.title, {
+              body: newNotif.message,
+              icon: '/favicon.png',
+              badge: '/favicon.png',
+              tag: item.id,
+            });
+          });
+        } else {
+          new Notification(newNotif.title, {
+            body: newNotif.message,
+            icon: '/favicon.png',
+          });
+        }
+      } catch (err) {
+        console.error('Error enviando notificación nativa:', err);
+      }
+    }
   }, []);
 
   const clearAll = useCallback(() => {

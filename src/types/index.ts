@@ -22,6 +22,9 @@ export interface Category {
   icon?: string;
   color?: string;
   iconName?: string;
+  budgetLimit?: number;
+  coupleId?: string;
+  isDefault?: boolean;
 }
 
 export interface SplitRatio {
