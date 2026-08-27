@@ -73,6 +73,7 @@ export function useTransactions() {
         categoryId: row.category_id || 'General',
         accountId: row.account_id,
         splitRatio: row.split_ratio || { userA: 50, userB: 50 },
+        receiptUrl: row.receipt_url || undefined,
         createdAt: row.created_at,
         date: row.created_at,
       }));
@@ -100,12 +101,13 @@ export function useTransactions() {
     };
   }, [fetchTransactions]);
 
-  // Suscripción Realtime
+  // Suscripción Realtime con identificador único por instancia
   useEffect(() => {
     if (!coupleId || !navigator.onLine) return;
 
+    const channelId = `realtime-tx-${coupleId}-${Math.random().toString(36).substring(2, 7)}`;
     const channel = supabase
-      .channel(`realtime-transactions-${coupleId}`)
+      .channel(channelId)
       .on(
         'postgres_changes',
         {
@@ -127,7 +129,7 @@ export function useTransactions() {
 
   // Agregar Gasto
   const addTransaction = async (
-    newTxData: Omit<Transaction, 'id' | 'date'> & { createdAt?: string; date?: string }
+    newTxData: Omit<Transaction, 'id' | 'date'> & { createdAt?: string; date?: string; receiptUrl?: string }
   ): Promise<boolean> => {
     const createdAtVal = newTxData.createdAt || newTxData.date || new Date().toISOString();
 
@@ -144,6 +146,7 @@ export function useTransactions() {
         categoryId: newTxData.categoryId || 'General',
         accountId: newTxData.accountId,
         splitRatio: newTxData.splitRatio || { userA: 50, userB: 50 },
+        receiptUrl: newTxData.receiptUrl,
         createdAt: createdAtVal,
         date: createdAtVal,
       };
@@ -188,6 +191,7 @@ export function useTransactions() {
         category_id: newTxData.categoryId || 'General',
         account_id: finalAccountId,
         split_ratio: newTxData.splitRatio || { userA: 50, userB: 50 },
+        receipt_url: newTxData.receiptUrl || null,
         created_at: createdAtVal,
       };
 
@@ -210,6 +214,7 @@ export function useTransactions() {
         categoryId: data.category_id,
         accountId: data.account_id,
         splitRatio: data.split_ratio,
+        receiptUrl: data.receipt_url || undefined,
         createdAt: data.created_at,
         date: data.created_at,
       };
@@ -247,6 +252,7 @@ export function useTransactions() {
           updatePayload.account_id = isValidUUID(updatedFields.accountId) ? updatedFields.accountId : null;
         }
         if (updatedFields.splitRatio !== undefined) updatePayload.split_ratio = updatedFields.splitRatio;
+        if (updatedFields.receiptUrl !== undefined) updatePayload.receipt_url = updatedFields.receiptUrl;
         if (updatedFields.createdAt !== undefined) updatePayload.created_at = updatedFields.createdAt;
 
         const { error: updateError } = await supabase

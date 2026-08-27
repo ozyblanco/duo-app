@@ -29,7 +29,7 @@ import type { SplitRatio } from './types';
 
 function MainApp() {
   const { user, loading: authLoading } = useAuth();
-  const { transactions, addTransaction, refreshTransactions } = useTransactions();
+  const { transactions, addTransaction, updateTransaction, deleteTransaction, refreshTransactions } = useTransactions();
   const { currentUser, partner, loading: profilesLoading } = useCoupleProfiles();
   const { debitAccount } = useAccounts();
   const { addNotification } = useNotifications();
@@ -129,6 +129,7 @@ function MainApp() {
     accountId?: string;
     currency?: string;
     splitRatio?: SplitRatio;
+    receiptUrl?: string;
     createdAt?: string;
   }) => {
     const payerId = data.paidByUserId || currentUserId;
@@ -143,6 +144,7 @@ function MainApp() {
       categoryId: data.category,
       accountId: data.accountId,
       splitRatio: data.splitRatio || { userA: 50, userB: 50 },
+      receiptUrl: data.receiptUrl,
       createdAt: data.createdAt || new Date().toISOString(),
     });
 
@@ -185,7 +187,6 @@ function MainApp() {
     });
 
     if (success) {
-      // Débito automático de la cuenta seleccionada
       if (settlementData.accountId && settlementData.deductAmount) {
         await debitAccount(settlementData.accountId, settlementData.deductAmount);
       }
@@ -263,7 +264,9 @@ function MainApp() {
       {activeTab === 'transactions' && (
         <TransactionsView 
           transactions={transactions} 
-          onNewTransaction={() => setIsModalOpen(true)} 
+          onNewTransaction={() => setIsModalOpen(true)}
+          onUpdateTransaction={updateTransaction}
+          onDeleteTransaction={deleteTransaction}
         />
       )}
 

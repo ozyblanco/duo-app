@@ -14,11 +14,11 @@ import {
   Clock,
   Calendar,
   Pencil,
-  Trash2
+  Trash2,
+  Receipt
 } from 'lucide-react';
 import type { Transaction } from '@/types';
 import { useCoupleProfiles } from '@/hooks/useCoupleProfiles';
-import { useTransactions } from '@/hooks/useTransactions';
 import { useCurrency } from '@/hooks/useCurrency';
 import { EditTransactionModal } from '@/components/modals/EditTransactionModal';
 import { mockCategories } from '@/data/mockData';
@@ -26,6 +26,8 @@ import { mockCategories } from '@/data/mockData';
 interface TransactionsViewProps {
   transactions: Transaction[];
   onNewTransaction: () => void;
+  onUpdateTransaction: (id: string, data: Partial<Omit<Transaction, 'id'>>) => Promise<boolean>;
+  onDeleteTransaction: (id: string) => Promise<boolean>;
 }
 
 function getCategoryName(tx: Transaction) {
@@ -35,9 +37,13 @@ function getCategoryName(tx: Transaction) {
   return cat ? cat.name : catVal;
 }
 
-export function TransactionsView({ transactions, onNewTransaction }: TransactionsViewProps) {
+export function TransactionsView({ 
+  transactions, 
+  onNewTransaction,
+  onUpdateTransaction,
+  onDeleteTransaction
+}: TransactionsViewProps) {
   const { currentUser, partner } = useCoupleProfiles();
-  const { updateTransaction, deleteTransaction } = useTransactions();
   const { formatAmount } = useCurrency();
 
   const [searchTerm, setSearchTerm] = useState('');
@@ -49,8 +55,8 @@ export function TransactionsView({ transactions, onNewTransaction }: Transaction
   const [endDate, setEndDate] = useState<string>('');
   const [txType, setTxType] = useState<'all' | 'expenses' | 'settlements'>('all');
 
-  // Estado para el modal de edición
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
+  const [viewingReceiptUrl, setViewingReceiptUrl] = useState<string | null>(null);
 
   const filteredTransactions = useMemo(() => {
     const now = new Date();
@@ -129,7 +135,7 @@ export function TransactionsView({ transactions, onNewTransaction }: Transaction
 
   const handleDelete = async (id: string, title: string) => {
     if (confirm(`¿Estás seguro de que deseas eliminar "${title}"?`)) {
-      await deleteTransaction(id);
+      await onDeleteTransaction(id);
     }
   };
 
@@ -148,6 +154,7 @@ export function TransactionsView({ transactions, onNewTransaction }: Transaction
         </div>
 
         <button
+          type="button"
           onClick={onNewTransaction}
           className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold px-4 py-2.5 rounded-xl transition-all shadow-xs active:scale-95 self-start sm:self-auto cursor-pointer"
         >
@@ -170,6 +177,7 @@ export function TransactionsView({ transactions, onNewTransaction }: Transaction
             />
             {searchTerm && (
               <button
+                type="button"
                 onClick={() => setSearchTerm('')}
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
               >
@@ -209,6 +217,7 @@ export function TransactionsView({ transactions, onNewTransaction }: Transaction
           </div>
 
           <button
+            type="button"
             onClick={() => setSortBy(sortBy === 'date' ? 'amount' : 'date')}
             className="flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all cursor-pointer"
           >
@@ -246,6 +255,7 @@ export function TransactionsView({ transactions, onNewTransaction }: Transaction
               <User className="w-3 h-3" /> Pagó:
             </span>
             <button
+              type="button"
               onClick={() => setSelectedPayer('all')}
               className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
                 selectedPayer === 'all'
@@ -257,6 +267,7 @@ export function TransactionsView({ transactions, onNewTransaction }: Transaction
             </button>
             {currentUser && (
               <button
+                type="button"
                 onClick={() => setSelectedPayer(currentUser.id)}
                 className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
                   selectedPayer === currentUser.id
@@ -272,6 +283,7 @@ export function TransactionsView({ transactions, onNewTransaction }: Transaction
             )}
             {partner && (
               <button
+                type="button"
                 onClick={() => setSelectedPayer(partner.id)}
                 className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
                   selectedPayer === partner.id
@@ -292,6 +304,7 @@ export function TransactionsView({ transactions, onNewTransaction }: Transaction
               <Filter className="w-3 h-3" /> Tipo:
             </span>
             <button
+              type="button"
               onClick={() => setTxType('all')}
               className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
                 txType === 'all'
@@ -302,6 +315,7 @@ export function TransactionsView({ transactions, onNewTransaction }: Transaction
               Todos
             </button>
             <button
+              type="button"
               onClick={() => setTxType('expenses')}
               className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
                 txType === 'expenses'
@@ -312,6 +326,7 @@ export function TransactionsView({ transactions, onNewTransaction }: Transaction
               Gastos
             </button>
             <button
+              type="button"
               onClick={() => setTxType('settlements')}
               className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
                 txType === 'settlements'
@@ -324,6 +339,7 @@ export function TransactionsView({ transactions, onNewTransaction }: Transaction
 
             {hasActiveFilters && (
               <button
+                type="button"
                 onClick={clearFilters}
                 className="ml-auto lg:ml-2 text-xs font-semibold text-rose-500 hover:text-rose-600 flex items-center gap-1 cursor-pointer"
               >
@@ -346,7 +362,7 @@ export function TransactionsView({ transactions, onNewTransaction }: Transaction
         </div>
       </div>
 
-      {/* Lista de Movimientos con Acciones de Edición/Eliminación */}
+      {/* Lista de Movimientos */}
       <div className="space-y-2">
         {filteredTransactions.length === 0 ? (
           <div className="p-12 text-center bg-white dark:bg-[#161B22] border border-slate-200/80 dark:border-slate-800 rounded-2xl space-y-2">
@@ -393,9 +409,23 @@ export function TransactionsView({ transactions, onNewTransaction }: Transaction
                   </div>
 
                   <div className="min-w-0 space-y-0.5">
-                    <h3 className="text-xs font-bold text-slate-900 dark:text-white truncate">
-                      {tx.title}
-                    </h3>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-xs font-bold text-slate-900 dark:text-white truncate">
+                        {tx.title}
+                      </h3>
+                      {tx.receiptUrl && (
+                        <button
+                          type="button"
+                          onClick={() => setViewingReceiptUrl(tx.receiptUrl!)}
+                          className="flex items-center gap-1 text-[10px] font-bold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-500/10 hover:bg-blue-100 dark:hover:bg-blue-500/20 px-2 py-0.5 rounded-md transition-colors cursor-pointer"
+                          title="Ver comprobante adjunto"
+                        >
+                          <Receipt className="w-3 h-3" />
+                          <span>Recibo</span>
+                        </button>
+                      )}
+                    </div>
+
                     <div className="flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400 flex-wrap">
                       <span className="flex items-center gap-1 font-medium">
                         <User className="w-3 h-3" /> Pagado por {payerName}
@@ -436,7 +466,6 @@ export function TransactionsView({ transactions, onNewTransaction }: Transaction
                     )}
                   </div>
 
-                  {/* Botones de Acción (Editar y Eliminar) */}
                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                     {!isSettlement && (
                       <button
@@ -470,8 +499,34 @@ export function TransactionsView({ transactions, onNewTransaction }: Transaction
           transaction={editingTransaction}
           isOpen={Boolean(editingTransaction)}
           onClose={() => setEditingTransaction(null)}
-          onUpdate={updateTransaction}
+          onUpdate={onUpdateTransaction}
         />
+      )}
+
+      {/* Modal Lightbox Visor de Comprobante */}
+      {viewingReceiptUrl && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md"
+          onClick={() => setViewingReceiptUrl(null)}
+        >
+          <div
+            className="relative max-w-lg max-h-[85vh] bg-white dark:bg-[#161B22] p-2 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              onClick={() => setViewingReceiptUrl(null)}
+              className="absolute top-4 right-4 bg-slate-900/70 text-white p-2 rounded-full hover:bg-slate-900 transition-all cursor-pointer z-10"
+            >
+              <X className="w-4 h-4" />
+            </button>
+            <img
+              src={viewingReceiptUrl}
+              alt="Comprobante en detalle"
+              className="max-h-[80vh] w-auto object-contain rounded-xl"
+            />
+          </div>
+        </div>
       )}
     </div>
   );
