@@ -65,40 +65,39 @@ export function GoalsView() {
   // Formulario Abono
   const [depositAmount, setDepositAmount] = useState('');
   const [depositCurrency, setDepositCurrency] = useState<'USD' | 'VES'>('USD');
-  const [rateType, setRateType] = useState<'binance' | 'bcv'>('bcv');
+  const [rateType, setRateType] = useState<'bcv' | 'binance'>('bcv');
   const [selectedPayerId, setSelectedPayerId] = useState<string>('');
   const [selectedAccountId, setSelectedAccountId] = useState<string>('');
 
   const activePayerId = selectedPayerId || currentUserId;
 
-  // Cálculos de conversión y tasa para el abono
-  const activeRate = (rateType === 'bcv' ? rates.bcvUsd : rates.binanceUsdt) || 36.5;
+  // Tasa de cambio activa
+  const activeRate = (rateType === 'bcv' ? rates.bcvUsd : rates.binanceUsdt) || 860;
   const numericAmount = parseFloat(depositAmount) || 0;
 
-  // Monto final que se acreditará a la meta (siempre evaluada en USD)
-  const finalAmountInUsd =
-    depositCurrency === 'VES'
-      ? numericAmount > 0
-        ? Number((numericAmount / activeRate).toFixed(2))
-        : 0
-      : numericAmount;
+  // Cálculo en USD (para la meta) y en VES (para cuentas venezolanas)
+  const amountInUsd =
+    depositCurrency === 'USD'
+      ? numericAmount
+      : numericAmount > 0 ? Number((numericAmount / activeRate).toFixed(2)) : 0;
 
-  // Cuenta seleccionada para el débito
+  const amountInVes =
+    depositCurrency === 'VES'
+      ? numericAmount
+      : numericAmount > 0 ? Number((numericAmount * activeRate).toFixed(2)) : 0;
+
+  // Cuenta bancaria seleccionada
   const selectedAccount = accounts.find((a) => a.id === selectedAccountId);
 
-  // Cálculo del monto exacto que se debitará de la cuenta bancaria
-  let calculatedDebitFromAccount = 0;
+  // MONTO EXACTO A DEBITAR SEGÚN LA MONEDA DE LA CUENTA
+  let exactDebitAmount = 0;
   if (selectedAccount && numericAmount > 0) {
     if (selectedAccount.currency === 'VES') {
-      calculatedDebitFromAccount =
-        depositCurrency === 'VES'
-          ? numericAmount
-          : Number((numericAmount * activeRate).toFixed(2));
+      // Si la cuenta es venezolana, se debita en Bolívares
+      exactDebitAmount = amountInVes;
     } else {
-      calculatedDebitFromAccount =
-        depositCurrency === 'USD'
-          ? numericAmount
-          : Number((numericAmount / activeRate).toFixed(2));
+      // Si la cuenta es en dólares (PayPal, Binance, etc.), se debita en USD
+      exactDebitAmount = amountInUsd;
     }
   }
 
@@ -134,7 +133,7 @@ export function GoalsView() {
     }
   };
 
-  // ABONO A META VINCULADO AL FLUJO CONTABLE MULTIMONEDA
+  // ABONO CON CONVERSIÓN AUTOMÁTICA Y TRAZABILIDAD COMPLETA
   const handleDeposit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedGoal || numericAmount <= 0 || isSubmitting) return;
@@ -144,13 +143,13 @@ export function GoalsView() {
       const isUser = activePayerId === currentUserId;
       const payerDisplayName = isUser ? currentUserName : partnerName;
 
-      // 1. Aumentar el progreso de la meta (en USD)
-      const result = await depositToGoal(selectedGoal.id, finalAmountInUsd, isUser);
+      // 1. Aumentar el progreso de la meta (siempre en USD)
+      const result = await depositToGoal(selectedGoal.id, amountInUsd, isUser);
       const isGoalCompleted = typeof result === 'object' && result?.isNowCompleted;
 
       // 2. Débito bancario exacto en la moneda nativa de la cuenta seleccionada
-      if (selectedAccountId && calculatedDebitFromAccount > 0) {
-        await debitAccount(selectedAccountId, calculatedDebitFromAccount);
+      if (selectedAccountId && exactDebitAmount > 0) {
+        await debitAccount(selectedAccountId, exactDebitAmount);
         await refetchAccounts();
       }
 
@@ -164,7 +163,7 @@ export function GoalsView() {
 
       await addTransaction({
         title: `Abono: ${selectedGoal.title}`,
-        amount: finalAmountInUsd,
+        amount: amountInUsd,
         currency: 'USD',
         type: 'expense',
         ownership: 'joint',
@@ -177,17 +176,16 @@ export function GoalsView() {
 
       await refreshTransactions();
 
-      // 4. Notificación del gasto/abono realizado
-      const debitText =
-        selectedAccount
-          ? selectedAccount.currency === 'VES'
-            ? ` (Bs. ${calculatedDebitFromAccount.toLocaleString('es-VE')} debitados de ${selectedAccount.name})`
-            : ` ($${calculatedDebitFromAccount.toFixed(2)} USD debitados de ${selectedAccount.name})`
-          : '';
+      // 4. Notificación del abono con detalle del débito bancario
+      const debitDetail = selectedAccount
+        ? selectedAccount.currency === 'VES'
+          ? ` (Bs. ${exactDebitAmount.toLocaleString('es-VE', { minimumFractionDigits: 2 })} debitados de ${selectedAccount.name})`
+          : ` ($${exactDebitAmount.toFixed(2)} USD debitados de ${selectedAccount.name})`
+        : '';
 
       addNotification({
         title: 'Nuevo Abono a Meta 💰',
-        message: `${payerDisplayName} abonó $${finalAmountInUsd.toFixed(2)} USD a "${selectedGoal.title}"${debitText}.`,
+        message: `${payerDisplayName} abonó $${amountInUsd.toFixed(2)} USD a "${selectedGoal.title}"${debitDetail}.`,
         type: 'expense',
       });
 
@@ -200,7 +198,6 @@ export function GoalsView() {
         });
       }
 
-      // Limpiar formulario y cerrar
       setDepositAmount('');
       setSelectedGoal(null);
       setSelectedPayerId('');
@@ -310,15 +307,7 @@ export function GoalsView() {
                       <button
                         type="button"
                         disabled={isDone}
-                        onClick={() => {
-                          setSelectedGoal(goal);
-                          // Si hay una cuenta en VES, adaptar la moneda sugerida
-                          const firstVes = accounts.find((a) => a.currency === 'VES');
-                          if (firstVes && accounts.length === 1) {
-                            setSelectedAccountId(firstVes.id);
-                            setDepositCurrency('VES');
-                          }
-                        }}
+                        onClick={() => setSelectedGoal(goal)}
                         className={`text-xs font-semibold px-3 py-1.5 rounded-xl transition-all flex items-center gap-1 cursor-pointer ${
                           isDone 
                             ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 cursor-default' 
@@ -509,7 +498,7 @@ export function GoalsView() {
         </div>
       )}
 
-      {/* Modal: Realizar Abono con Multimoneda y Tasa en Vivo */}
+      {/* Modal: Realizar Abono con Cálculo Automático de Divisa */}
       {selectedGoal && (
         <div 
           className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200"
@@ -576,21 +565,21 @@ export function GoalsView() {
                 </div>
               </div>
 
-              {/* 2. Monto con Selector USD / VES y Tasa en Vivo */}
+              {/* 2. Monto con Selector USD / VES y Tasa */}
               <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-[#0B0F17] border border-slate-200/80 dark:border-slate-800 space-y-2">
                 <div className="flex items-center justify-between text-xs font-semibold text-slate-600 dark:text-slate-400">
                   <span>Monto a Abonar</span>
-                  {depositCurrency === 'VES' && (
+                  <div className="flex items-center gap-1 text-[11px] text-blue-600 dark:text-blue-400">
                     <button
                       type="button"
                       onClick={refetchRates}
                       disabled={ratesLoading}
-                      className="flex items-center gap-1 text-[11px] text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
+                      className="flex items-center gap-0.5 hover:underline cursor-pointer"
                     >
                       <RefreshCw className={`w-3 h-3 ${ratesLoading ? 'animate-spin' : ''}`} />
                       <span>Tasa: Bs. {activeRate.toFixed(2)}</span>
                     </button>
-                  )}
+                  </div>
                 </div>
 
                 <div className="flex items-center gap-2">
@@ -615,7 +604,7 @@ export function GoalsView() {
                     />
                   </div>
 
-                  {/* Toggle Moneda USD / VES */}
+                  {/* Selector USD / VES */}
                   <div className="flex bg-slate-200/70 dark:bg-slate-800 p-1 rounded-xl shrink-0">
                     <button
                       type="button"
@@ -642,46 +631,48 @@ export function GoalsView() {
                   </div>
                 </div>
 
-                {/* Fila de conversión si se usa VES */}
-                {depositCurrency === 'VES' && (
-                  <div className="pt-2 border-t border-slate-200/60 dark:border-slate-800/80 flex items-center justify-between text-xs">
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-slate-400 text-[10px]">Tasa:</span>
-                      <div className="flex gap-1">
-                        <button
-                          type="button"
-                          onClick={() => setRateType('bcv')}
-                          className={`px-1.5 py-0.5 rounded text-[10px] font-bold cursor-pointer ${
-                            rateType === 'bcv'
-                              ? 'bg-blue-500/20 text-blue-600 dark:text-blue-400 border border-blue-500/30'
-                              : 'text-slate-400'
-                          }`}
-                        >
-                          BCV
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setRateType('binance')}
-                          className={`px-1.5 py-0.5 rounded text-[10px] font-bold cursor-pointer ${
-                            rateType === 'binance'
-                              ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30'
-                              : 'text-slate-400'
-                          }`}
-                        >
-                          Binance
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-1 text-slate-800 dark:text-slate-200 font-bold font-numeric text-xs">
-                      <ArrowLeftRight className="w-3 h-3 text-blue-500" />
-                      <span>≈ ${finalAmountInUsd.toFixed(2)} USD para la meta</span>
+                {/* Switch de Tasa BCV / Binance */}
+                <div className="pt-2 border-t border-slate-200/60 dark:border-slate-800/80 flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-slate-400 text-[10px]">Tasa:</span>
+                    <div className="flex gap-1">
+                      <button
+                        type="button"
+                        onClick={() => setRateType('bcv')}
+                        className={`px-1.5 py-0.5 rounded text-[10px] font-bold cursor-pointer ${
+                          rateType === 'bcv'
+                            ? 'bg-blue-500/20 text-blue-600 dark:text-blue-400 border border-blue-500/30'
+                            : 'text-slate-400'
+                        }`}
+                      >
+                        BCV
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setRateType('binance')}
+                        className={`px-1.5 py-0.5 rounded text-[10px] font-bold cursor-pointer ${
+                          rateType === 'binance'
+                            ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30'
+                            : 'text-slate-400'
+                        }`}
+                      >
+                        Binance
+                      </button>
                     </div>
                   </div>
-                )}
+
+                  <div className="flex items-center gap-1 text-slate-800 dark:text-slate-200 font-bold font-numeric text-xs">
+                    <ArrowLeftRight className="w-3 h-3 text-blue-500" />
+                    <span>
+                      {depositCurrency === 'USD'
+                        ? `≈ Bs. ${amountInVes.toLocaleString('es-VE', { minimumFractionDigits: 2 })}`
+                        : `≈ $${amountInUsd.toFixed(2)} USD para la meta`}
+                    </span>
+                  </div>
+                </div>
               </div>
 
-              {/* 3. Descontar de Cuenta / Billetera */}
+              {/* 3. Descontar de Cuenta / Billetera con Débito Proporcional */}
               <div>
                 <label className="flex items-center gap-1 text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
                   <CreditCard className="w-3.5 h-3.5 text-blue-500" />
@@ -692,7 +683,7 @@ export function GoalsView() {
                   onChange={(e) => setSelectedAccountId(e.target.value)}
                   className="w-full px-3 py-2.5 rounded-xl text-xs bg-slate-50 dark:bg-[#0B0F17] border border-slate-200/80 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/30 cursor-pointer font-medium"
                 >
-                  <option value="">Abono manual (Sin descontar de ninguna cuenta)</option>
+                  <option value="">Abono manual (Sin descontar de cuenta)</option>
                   {accounts.map((acc) => (
                     <option key={acc.id} value={acc.id}>
                       {acc.name} — Saldo: {acc.currency === 'VES' ? 'Bs.' : '$'}{acc.balance.toLocaleString('es-VE', { minimumFractionDigits: 2 })} {acc.currency}
@@ -700,14 +691,14 @@ export function GoalsView() {
                   ))}
                 </select>
 
-                {/* Resumen explicativo del débito */}
+                {/* Recuadro de Confirmación de Débito */}
                 {selectedAccount && numericAmount > 0 && (
-                  <div className="mt-2 p-2.5 rounded-xl bg-blue-50/80 dark:bg-blue-500/10 border border-blue-200/60 dark:border-blue-500/20 text-[11px] text-blue-700 dark:text-blue-300 flex items-center justify-between">
-                    <span>Se debitará de {selectedAccount.name}:</span>
-                    <strong className="font-numeric font-bold">
+                  <div className="mt-2 p-2.5 rounded-xl bg-blue-50 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/30 text-xs text-blue-800 dark:text-blue-300 flex items-center justify-between">
+                    <span>⚡ Se debitará de {selectedAccount.name}:</span>
+                    <strong className="font-numeric font-extrabold text-sm">
                       {selectedAccount.currency === 'VES'
-                        ? `Bs. ${calculatedDebitFromAccount.toLocaleString('es-VE', { minimumFractionDigits: 2 })}`
-                        : `$${calculatedDebitFromAccount.toFixed(2)} USD`}
+                        ? `Bs. ${exactDebitAmount.toLocaleString('es-VE', { minimumFractionDigits: 2 })}`
+                        : `$${exactDebitAmount.toFixed(2)} USD`}
                     </strong>
                   </div>
                 )}
@@ -728,7 +719,7 @@ export function GoalsView() {
                   className="px-5 py-2.5 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white shadow-md shadow-blue-500/20 active:scale-95 cursor-pointer flex items-center gap-1.5 disabled:opacity-50 disabled:pointer-events-none"
                 >
                   {isSubmitting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                  <span>{isSubmitting ? 'Abonando...' : 'Confirmar Abono'}</span>
+                  <span>Confirmar Abono (${amountInUsd.toFixed(2)} USD)</span>
                 </button>
               </div>
             </form>
