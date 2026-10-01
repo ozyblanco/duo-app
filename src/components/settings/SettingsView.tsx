@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { 
   Settings, 
   DollarSign, 
@@ -13,8 +14,13 @@ import {
   Pencil,
   AlertTriangle,
   BellRing,
-  Send
+  Send,
+  AlertOctagon,
+  ShieldAlert,
+  Loader2,
+  X
 } from 'lucide-react';
+import { supabase } from '@/lib/supabase';
 import { useCurrency } from '@/hooks/useCurrency';
 import { useAuth } from '@/hooks/useAuth';
 import { useCategories } from '@/hooks/useCategories';
@@ -37,6 +43,11 @@ export function SettingsView() {
   // Estados para Modal de Categorías
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
+
+  // Estados para Modal de Zona de Peligro (Hard Reset)
+  const [isResetModalOpen, setIsResetModalOpen] = useState(false);
+  const [resetConfirmInput, setResetConfirmInput] = useState('');
+  const [isResetting, setIsResetting] = useState(false);
 
   const handleCurrencyChange = (newCurrency: 'USD' | 'VES') => {
     setCurrency(newCurrency);
@@ -67,8 +78,8 @@ export function SettingsView() {
     }
   };
 
-  const handleResetData = () => {
-    if (confirm('¿Estás seguro de que deseas limpiar los datos locales en caché? (Esto no borrará tus datos en la base de datos de Supabase).')) {
+  const handleResetLocalCache = () => {
+    if (confirm('¿Estás seguro de que deseas limpiar la caché local del navegador? (Tus datos en Supabase permanecerán seguros).')) {
       const keysToRemove: string[] = [];
       for (let i = 0; i < localStorage.length; i++) {
         const key = localStorage.key(i);
@@ -78,6 +89,77 @@ export function SettingsView() {
       }
       keysToRemove.forEach((k) => localStorage.removeItem(k));
       window.location.reload();
+    }
+  };
+
+  // RESTABLECIMIENTO TOTAL DE LA APLICACIÓN (CUENTAS, GASTOS, METAS, ANALÍTICAS)
+  const handleHardReset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (resetConfirmInput.trim() !== 'RESTABLECER' || isResetting) return;
+
+    try {
+      setIsResetting(true);
+
+      const { data: authData } = await supabase.auth.getUser();
+      const user = authData?.user;
+      if (!user) throw new Error('Usuario no autenticado.');
+
+      // Obtener couple_id
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('couple_id')
+        .eq('id', user.id)
+        .maybeSingle();
+
+      const coupleId = profile?.couple_id;
+
+      // 1. Borrar todas las transacciones (gastos, liquidaciones, abonos)
+      if (coupleId) {
+        await supabase.from('transactions').delete().eq('couple_id', coupleId);
+      } else {
+        await supabase.from('transactions').delete().eq('paid_by_user_id', user.id);
+      }
+
+      // 2. Borrar todas las metas
+      if (coupleId) {
+        const { error: goalErr } = await supabase.from('goals').delete().eq('couple_id', coupleId);
+        if (goalErr) {
+          await supabase.from('goals').delete().eq('user_id', user.id);
+        }
+      } else {
+        await supabase.from('goals').delete().eq('user_id', user.id);
+      }
+
+      // 3. Borrar todas las cuentas bancarias del usuario
+      await supabase.from('accounts').delete().eq('user_id', user.id);
+
+      // 4. Limpiar caché local y estados de onboarding
+      const keysToRemove: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && (key.startsWith('duo_') || key.includes('checklist') || key.includes('onboarding'))) {
+          keysToRemove.push(key);
+        }
+      }
+      keysToRemove.forEach((k) => localStorage.removeItem(k));
+
+      // 5. Notificación
+      addNotification({
+        title: 'Espacio DUO Restablecido 🔄',
+        message: 'Se han eliminado todos los movimientos, metas y cuentas registradas.',
+        type: 'system',
+      });
+
+      setIsResetModalOpen(false);
+
+      // 6. Recargar para rehidratar todo a 0
+      setTimeout(() => {
+        window.location.reload();
+      }, 500);
+    } catch (err) {
+      console.error('Error durante el restablecimiento:', err);
+      alert('Ocurrió un error al intentar restablecer los datos. Comprueba tu conexión e intenta de nuevo.');
+      setIsResetting(false);
     }
   };
 
@@ -117,6 +199,94 @@ export function SettingsView() {
       .reduce((acc, curr) => acc + curr.amount, 0);
   };
 
+  // Contenido del Modal de Restablecimiento en Portal
+  const resetModalContent = isResetModalOpen ? (
+    <div 
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-xs animate-in fade-in duration-200"
+      onClick={() => !isResetting && setIsResetModalOpen(false)}
+    >
+      <div
+        className="w-full max-w-md bg-white dark:bg-[#161B22] border border-rose-300 dark:border-rose-900/60 rounded-3xl p-6 shadow-2xl space-y-5 animate-in zoom-in-95 duration-200"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-rose-500/10 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0">
+              <AlertOctagon className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-slate-900 dark:text-white">
+                Restablecer Todo a Cero
+              </h2>
+              <p className="text-[11px] text-rose-500 dark:text-rose-400 font-semibold">
+                Acción destructiva e irreversible
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsResetModalOpen(false)}
+            disabled={isResetting}
+            className="p-1 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer disabled:opacity-50"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="p-3.5 rounded-2xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/40 text-xs text-rose-800 dark:text-rose-300 space-y-1.5 leading-relaxed">
+          <p className="font-bold flex items-center gap-1.5 text-rose-700 dark:text-rose-200">
+            <ShieldAlert className="w-4 h-4 shrink-0" />
+            Esta acción eliminará de forma definitiva:
+          </p>
+          <ul className="list-disc list-inside space-y-0.5 text-[11px] pl-1 opacity-90">
+            <li>Todos los gastos, transferencias y movimientos registrados.</li>
+            <li>Todas las metas de ahorro y abonos acumulados.</li>
+            <li>Todas las cuentas bancarias y billeteras de tu espacio.</li>
+            <li>Todos los gráficos de análisis y presupuestos fijados.</li>
+          </ul>
+        </div>
+
+        <form onSubmit={handleHardReset} className="space-y-4">
+          <div className="space-y-1.5">
+            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+              Para confirmar, escribe <strong className="text-rose-600 dark:text-rose-400 font-mono">RESTABLECER</strong> a continuación:
+            </label>
+            <input
+              type="text"
+              required
+              value={resetConfirmInput}
+              onChange={(e) => setResetConfirmInput(e.target.value.toUpperCase())}
+              placeholder="RESTABLECER"
+              className="w-full text-center py-2.5 px-3 rounded-xl bg-slate-50 dark:bg-[#0B0F17] border border-slate-300 dark:border-slate-700 text-xs font-mono font-bold tracking-widest text-slate-900 dark:text-white uppercase focus:outline-none focus:ring-2 focus:ring-rose-500/30 focus:border-rose-500"
+            />
+          </div>
+
+          <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-100 dark:border-slate-800">
+            <button
+              type="button"
+              disabled={isResetting}
+              onClick={() => {
+                setIsResetModalOpen(false);
+                setResetConfirmInput('');
+              }}
+              className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer disabled:opacity-50"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={resetConfirmInput.trim() !== 'RESTABLECER' || isResetting}
+              className="px-5 py-2 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-500 text-white shadow-md shadow-rose-600/20 active:scale-95 transition-all cursor-pointer flex items-center gap-1.5 disabled:opacity-40 disabled:pointer-events-none"
+            >
+              {isResetting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+              <span>{isResetting ? 'Borrando todo...' : 'Sí, borrar todo a 0'}</span>
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  ) : null;
+
   return (
     <div className="space-y-6 pb-12">
       <div>
@@ -125,7 +295,7 @@ export function SettingsView() {
           Configuración General
         </h1>
         <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-          Preferencias del sistema, notificaciones push, categorías y presupuestos
+          Preferencias del sistema, notificaciones push, categorías, presupuestos y datos
         </p>
       </div>
 
@@ -319,13 +489,13 @@ export function SettingsView() {
           </div>
         </div>
 
-        {/* Gestión de Datos */}
+        {/* Respaldo y Gestión de Datos */}
         <div className="space-y-3 pb-4 border-b border-slate-100 dark:border-slate-800">
           <h3 className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-2">
-            <Database className="w-4 h-4 text-purple-500" /> Gestión de Datos Local
+            <Database className="w-4 h-4 text-purple-500" /> Respaldo y Caché Local
           </h3>
           <p className="text-[11px] text-slate-400">
-            Exporta tus preferencias o restablece los datos en caché en caso de requerir un reinicio
+            Exporta tus movimientos en archivo JSON o limpia los archivos temporales almacenados en el navegador
           </p>
 
           <div className="flex flex-wrap items-center gap-3 pt-1">
@@ -340,11 +510,36 @@ export function SettingsView() {
 
             <button
               type="button"
-              onClick={handleResetData}
-              className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-500/10 hover:bg-rose-100 dark:hover:bg-rose-500/20 transition-all cursor-pointer"
+              onClick={handleResetLocalCache}
+              className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all cursor-pointer"
             >
-              <Trash2 className="w-4 h-4" />
-              <span>Restablecer Datos Locales</span>
+              <Trash2 className="w-4 h-4 text-slate-500" />
+              <span>Limpiar Caché Local</span>
+            </button>
+          </div>
+        </div>
+
+        {/* ZONA DE PELIGRO (RESTABLECER TODO A CERO) */}
+        <div className="p-4 rounded-2xl bg-rose-500/5 border border-rose-500/20 space-y-3">
+          <div className="flex items-start justify-between gap-4">
+            <div className="space-y-0.5">
+              <h3 className="text-xs font-bold text-rose-600 dark:text-rose-400 flex items-center gap-2">
+                <AlertOctagon className="w-4 h-4" /> Zona de Peligro: Restablecer DUO
+              </h3>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                Borra permanentemente todos los gastos, metas, cuentas y analíticas para empezar desde cero
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                setResetConfirmInput('');
+                setIsResetModalOpen(true);
+              }}
+              className="px-3.5 py-2 rounded-xl text-xs font-bold text-white bg-rose-600 hover:bg-rose-500 shadow-sm shadow-rose-600/20 transition-all cursor-pointer shrink-0 active:scale-95"
+            >
+              Restablecer a 0
             </button>
           </div>
         </div>
@@ -352,8 +547,8 @@ export function SettingsView() {
         {/* Cerrar Sesión */}
         <div className="flex items-center justify-between pt-1">
           <div className="space-y-0.5">
-            <h3 className="text-xs font-bold text-rose-600 dark:text-rose-400 flex items-center gap-2">
-              <LogOut className="w-4 h-4" /> Sesión
+            <h3 className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-2">
+              <LogOut className="w-4 h-4 text-slate-400" /> Sesión de Usuario
             </h3>
             <p className="text-[11px] text-slate-400">
               Desconecta tu cuenta de forma segura en este dispositivo
@@ -363,7 +558,7 @@ export function SettingsView() {
           <button
             type="button"
             onClick={handleSignOut}
-            className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-rose-600 hover:bg-rose-500 transition-all cursor-pointer active:scale-95"
+            className="px-4 py-2 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all cursor-pointer active:scale-95"
           >
             Cerrar Sesión
           </button>
@@ -393,6 +588,9 @@ export function SettingsView() {
           }
         }}
       />
+
+      {/* Modal de Restablecimiento en Portal */}
+      {typeof document !== 'undefined' && resetModalContent && createPortal(resetModalContent, document.body)}
     </div>
   );
 }
