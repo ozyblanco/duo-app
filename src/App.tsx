@@ -27,13 +27,13 @@ import { ProfileView } from './components/profile/ProfileView';
 import { SettingsView } from './components/settings/SettingsView';
 import { RatesWidget } from './components/currency/RatesWidget';
 import { AuthView } from './components/auth/AuthView';
-import type { SplitRatio } from './types';
+import type { Transaction, SplitRatio } from './types';
 
 function MainApp() {
   const { user, loading: authLoading } = useAuth();
   const { transactions, addTransaction, updateTransaction, deleteTransaction, refreshTransactions } = useTransactions();
   const { currentUser, partner, loading: profilesLoading } = useCoupleProfiles();
-  const { accounts, debitAccount } = useAccounts();
+  const { accounts, debitAccount, creditAccount } = useAccounts();
   const { goals } = useGoals();
   const { addNotification } = useNotifications();
 
@@ -74,7 +74,6 @@ function MainApp() {
           setIsPartnerConnected(false);
         }
 
-        // Determinar si corresponde abrir el Onboarding
         const isCompletedLocally = localStorage.getItem(`duo_onboarding_completed_${user.id}`);
         if (!isCompletedLocally) {
           setIsOnboardingOpen(true);
@@ -133,6 +132,7 @@ function MainApp() {
     }
   }, [totalJointSpent, addNotification]);
 
+  // 1. REGISTRAR GASTO CON DÉBITO BANCARIO
   const handleAddTransaction = async (data: {
     title: string;
     amount: number;
@@ -178,6 +178,60 @@ function MainApp() {
     }
   };
 
+  // 2. EDITAR GASTO CON CONCILIACIÓN BANCARIA AUTOMÁTICA
+  const handleUpdateTransaction = async (
+    id: string,
+    updatedData: Partial<Omit<Transaction, 'id'>>
+  ): Promise<boolean> => {
+    const oldTx = transactions.find((t) => t.id === id);
+    const success = await updateTransaction(id, updatedData);
+
+    if (success && oldTx) {
+      const oldAccountId = oldTx.accountId;
+      const newAccountId = updatedData.accountId !== undefined ? updatedData.accountId : oldAccountId;
+      const oldAmount = oldTx.amount;
+      const newAmount = updatedData.amount !== undefined ? updatedData.amount : oldAmount;
+
+      if (oldAccountId === newAccountId) {
+        // Misma cuenta pero monto modificado
+        if (oldAccountId && oldAmount !== newAmount) {
+          const diff = Number((newAmount - oldAmount).toFixed(2));
+          if (diff > 0) {
+            await debitAccount(oldAccountId, diff);
+          } else if (diff < 0) {
+            await creditAccount(oldAccountId, Math.abs(diff));
+          }
+        }
+      } else {
+        // La cuenta bancaria cambió
+        if (oldAccountId && oldAmount > 0) {
+          await creditAccount(oldAccountId, oldAmount); // Reembolsar a la anterior
+        }
+        if (newAccountId && newAmount > 0) {
+          await debitAccount(newAccountId, newAmount); // Debitar a la nueva
+        }
+      }
+    }
+    return success;
+  };
+
+  // 3. ELIMINAR GASTO CON REEMBOLSO BANCARIO
+  const handleDeleteTransaction = async (id: string): Promise<boolean> => {
+    const targetTx = transactions.find((t) => t.id === id);
+    const success = await deleteTransaction(id);
+
+    if (success && targetTx?.accountId && targetTx.amount > 0) {
+      await creditAccount(targetTx.accountId, targetTx.amount);
+      addNotification({
+        title: 'Movimiento eliminado',
+        message: `Se reembolsaron $${targetTx.amount.toFixed(2)} al saldo de la cuenta.`,
+        type: 'system',
+      });
+    }
+    return success;
+  };
+
+  // 4. SALDAR CUENTAS
   const handleSettleUp = async (settlementData: {
     title: string;
     amount: number;
@@ -239,13 +293,11 @@ function MainApp() {
     >
       {activeTab === 'dashboard' && (
         <div className="space-y-6">
-          {/* Banner de fin de mes */}
           <MonthEndBanner 
             netBalance={netBalance} 
             onOpenSettleModal={() => setIsSettleModalOpen(true)} 
           />
 
-          {/* Checklist de Onboarding si quedan tareas */}
           <OnboardingChecklist
             isPartnerConnected={isPartnerConnected}
             hasAccounts={accounts.length > 0}
@@ -255,7 +307,6 @@ function MainApp() {
             onNavigateTab={setActiveTab}
           />
 
-          {/* 1. Resumen Financiero y Deuda Mutua */}
           <BalanceOverview 
             totalJointSpent={totalJointSpent}
             userPaidTotal={userPaidTotal}
@@ -264,17 +315,14 @@ function MainApp() {
             onOpenSettleModal={() => setIsSettleModalOpen(true)}
           />
 
-          {/* 2. Movimientos Recientes */}
           <TransactionList 
             transactions={transactions} 
             onViewAll={() => setActiveTab('transactions')}
             onNewTransaction={() => setIsModalOpen(true)}
           />
 
-          {/* 3. Resumen del Mes y Ahorro */}
           <MonthlyAnalytics transactions={transactions} />
 
-          {/* 4. Tasas de Cambio (Referencia Secundaria) */}
           <RatesWidget />
         </div>
       )}
@@ -285,8 +333,8 @@ function MainApp() {
         <TransactionsView 
           transactions={transactions} 
           onNewTransaction={() => setIsModalOpen(true)}
-          onUpdateTransaction={updateTransaction}
-          onDeleteTransaction={deleteTransaction}
+          onUpdateTransaction={handleUpdateTransaction}
+          onDeleteTransaction={handleDeleteTransaction}
         />
       )}
 
@@ -298,14 +346,12 @@ function MainApp() {
 
       {activeTab === 'settings' && <SettingsView />}
 
-      {/* Modal Nuevo Gasto */}
       <NewTransactionModal 
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
         onSubmit={handleAddTransaction}
       />
 
-      {/* Modal Saldar Cuentas */}
       <SettleUpModal
         isOpen={isSettleModalOpen}
         onClose={() => setIsSettleModalOpen(false)}
@@ -313,7 +359,6 @@ function MainApp() {
         onSubmit={handleSettleUp}
       />
 
-      {/* Asistente de Onboarding Inteligente */}
       <OnboardingWizard
         isOpen={isOnboardingOpen}
         onClose={() => setIsOnboardingOpen(false)}

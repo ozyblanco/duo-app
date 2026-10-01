@@ -5,13 +5,14 @@ import {
   Calendar, 
   Sparkles, 
   CheckCircle2, 
-  X,
-  PiggyBank,
-  Loader2,
+  X, 
+  PiggyBank, 
+  Loader2, 
   Trash2,
   CreditCard
 } from 'lucide-react';
 import { useGoals } from '@/hooks/useGoals';
+import { useTransactions } from '@/hooks/useTransactions';
 import { useCoupleProfiles } from '@/hooks/useCoupleProfiles';
 import { useNotifications } from '@/hooks/useNotifications';
 import { useCurrency } from '@/hooks/useCurrency';
@@ -31,6 +32,7 @@ export function GoalsView() {
     deleteGoal 
   } = useGoals();
 
+  const { addTransaction } = useTransactions();
   const { currentUser, partner } = useCoupleProfiles();
   const { addNotification } = useNotifications();
   const { formatAmount } = useCurrency();
@@ -94,6 +96,7 @@ export function GoalsView() {
     }
   };
 
+  // ABONO A META VINCULADO AL FLUJO CONTABLE
   const handleDeposit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedGoal || !depositAmount) return;
@@ -106,14 +109,30 @@ export function GoalsView() {
       const isUser = activePayerId === currentUserId;
       const payerDisplayName = isUser ? currentUserName : partnerName;
 
+      // 1. Aumentar el progreso de la meta
       const { success, isNowCompleted } = await depositToGoal(selectedGoal.id, amount, isUser);
 
       if (success) {
-        // Débito automático de la cuenta seleccionada si aplica
+        // 2. Registrar el movimiento en el historial oficial de transacciones
+        await addTransaction({
+          title: `Abono: ${selectedGoal.title}`,
+          amount,
+          currency: 'USD',
+          type: 'expense',
+          ownership: 'joint',
+          paidByUserId: activePayerId,
+          categoryId: 'Ahorro',
+          accountId: selectedAccountId || undefined,
+          splitRatio: isUser ? { userA: 100, userB: 0 } : { userA: 0, userB: 100 },
+          createdAt: new Date().toISOString(),
+        });
+
+        // 3. Débito bancario automático de la cuenta seleccionada
         if (selectedAccountId) {
           await debitAccount(selectedAccountId, amount);
         }
 
+        // 4. Notificación
         if (isNowCompleted) {
           addNotification({
             title: '¡Meta Alcanzada! 🎉',
@@ -146,7 +165,6 @@ export function GoalsView() {
 
   return (
     <div className="space-y-6 pb-12">
-      {/* Header Módulo */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-xl font-bold text-slate-900 dark:text-white tracking-tight flex items-center gap-2">
@@ -168,7 +186,6 @@ export function GoalsView() {
         </button>
       </div>
 
-      {/* Banner Resumen */}
       <div className="p-5 rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-500/10">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="space-y-1">
@@ -203,7 +220,6 @@ export function GoalsView() {
         </div>
       )}
 
-      {/* Rejilla de Metas */}
       {!isLoading && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {goals.length === 0 ? (
@@ -261,7 +277,6 @@ export function GoalsView() {
                     </div>
                   </div>
 
-                  {/* Saldo y Barra */}
                   <div className="mt-4 space-y-2">
                     <div className="flex items-baseline justify-between">
                       <span className="text-lg font-extrabold text-slate-900 dark:text-white">
@@ -292,7 +307,6 @@ export function GoalsView() {
                     </div>
                   </div>
 
-                  {/* Aportes Individuales Dinámicos */}
                   <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between text-xs">
                     <div className="flex items-center gap-1.5">
                       <div className="h-5 w-5 rounded-full bg-[#3B82F6] text-[9px] flex items-center justify-center font-bold text-white uppercase">
@@ -510,17 +524,17 @@ export function GoalsView() {
               <div>
                 <label className="flex items-center gap-1 text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
                   <CreditCard className="w-3.5 h-3.5" />
-                  <span>Descontar de Cuenta (Opcional)</span>
+                  <span>Descontar de Cuenta / Billetera</span>
                 </label>
                 <select
                   value={selectedAccountId}
                   onChange={(e) => setSelectedAccountId(e.target.value)}
                   className="w-full px-3 py-2 rounded-xl text-xs bg-slate-50 dark:bg-[#0B0F17] border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/30 cursor-pointer"
                 >
-                  <option value="">No descontar (Abono manual)</option>
+                  <option value="">Abono manual (Sin descontar de cuenta)</option>
                   {accounts.map((acc) => (
                     <option key={acc.id} value={acc.id}>
-                      {acc.name} ({acc.currency})
+                      {acc.name} (${acc.balance.toFixed(2)} {acc.currency})
                     </option>
                   ))}
                 </select>

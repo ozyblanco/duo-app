@@ -51,6 +51,27 @@ export function useAccounts() {
     };
   }, [fetchAccountsData]);
 
+  // Suscripción Realtime para actualización instantánea de balances entre ambos
+  useEffect(() => {
+    if (!navigator.onLine) return;
+
+    const channelName = `realtime_accounts_${Math.random().toString(36).substring(2, 9)}`;
+    const channel = supabase
+      .channel(channelName)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'accounts' },
+        () => {
+          fetchAccountsData();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [fetchAccountsData]);
+
   const refetch = async () => {
     setIsLoading(true);
     await fetchAccountsData();
@@ -123,7 +144,7 @@ export function useAccounts() {
     }
   };
 
-  // Débito automático de saldo (para pagos y liquidaciones)
+  // Débito automático de saldo (restar dinero)
   const debitAccount = async (id: string, amountToDeduct: number): Promise<boolean> => {
     try {
       const target = accounts.find((a) => a.id === id);
@@ -144,6 +165,31 @@ export function useAccounts() {
       return true;
     } catch (err) {
       console.error('Error al debitar saldo de la cuenta:', err);
+      return false;
+    }
+  };
+
+  // Crédito automático de saldo (reembolsar o sumar dinero)
+  const creditAccount = async (id: string, amountToAdd: number): Promise<boolean> => {
+    try {
+      const target = accounts.find((a) => a.id === id);
+      if (!target) return false;
+
+      const newBalance = Number((target.balance + amountToAdd).toFixed(2));
+
+      const { error } = await supabase
+        .from('accounts')
+        .update({ balance: newBalance })
+        .eq('id', id);
+
+      if (error) throw error;
+
+      setAccounts((prev) =>
+        prev.map((acc) => (acc.id === id ? { ...acc, balance: newBalance } : acc))
+      );
+      return true;
+    } catch (err) {
+      console.error('Error al acreditar saldo a la cuenta:', err);
       return false;
     }
   };
@@ -221,6 +267,7 @@ export function useAccounts() {
     addAccount,
     updateAccount,
     debitAccount,
+    creditAccount,
     softDeleteAccount,
     restoreAccount,
     permanentDeleteAccount,
