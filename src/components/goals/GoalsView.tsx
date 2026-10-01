@@ -9,7 +9,10 @@ import {
   PiggyBank, 
   Loader2, 
   Trash2,
-  CreditCard
+  CreditCard,
+  ArrowLeftRight,
+  RefreshCw,
+  DollarSign
 } from 'lucide-react';
 import { useGoals } from '@/hooks/useGoals';
 import { useTransactions } from '@/hooks/useTransactions';
@@ -18,6 +21,7 @@ import { useNotifications } from '@/hooks/useNotifications';
 import { useCurrency } from '@/hooks/useCurrency';
 import { useCategories } from '@/hooks/useCategories';
 import { useAccounts } from '@/components/accounts/useAccounts';
+import { useExchangeRates } from '@/hooks/useExchangeRates';
 import type { Goal } from '@/types';
 
 export function GoalsView() {
@@ -32,12 +36,13 @@ export function GoalsView() {
     deleteGoal 
   } = useGoals();
 
-  const { addTransaction } = useTransactions();
+  const { addTransaction, refreshTransactions } = useTransactions();
   const { currentUser, partner } = useCoupleProfiles();
   const { addNotification } = useNotifications();
   const { formatAmount } = useCurrency();
   const { categories } = useCategories();
-  const { accounts, debitAccount } = useAccounts();
+  const { accounts, debitAccount, refetch: refetchAccounts } = useAccounts();
+  const { rates, isLoading: ratesLoading, refetch: refetchRates } = useExchangeRates();
 
   const currentUserId = currentUser?.id || '';
   const partnerId = partner?.id || '';
@@ -59,10 +64,43 @@ export function GoalsView() {
 
   // Formulario Abono
   const [depositAmount, setDepositAmount] = useState('');
+  const [depositCurrency, setDepositCurrency] = useState<'USD' | 'VES'>('USD');
+  const [rateType, setRateType] = useState<'binance' | 'bcv'>('bcv');
   const [selectedPayerId, setSelectedPayerId] = useState<string>('');
   const [selectedAccountId, setSelectedAccountId] = useState<string>('');
 
   const activePayerId = selectedPayerId || currentUserId;
+
+  // Cálculos de conversión y tasa para el abono
+  const activeRate = (rateType === 'bcv' ? rates.bcvUsd : rates.binanceUsdt) || 36.5;
+  const numericAmount = parseFloat(depositAmount) || 0;
+
+  // Monto final que se acreditará a la meta (siempre evaluada en USD)
+  const finalAmountInUsd =
+    depositCurrency === 'VES'
+      ? numericAmount > 0
+        ? Number((numericAmount / activeRate).toFixed(2))
+        : 0
+      : numericAmount;
+
+  // Cuenta seleccionada para el débito
+  const selectedAccount = accounts.find((a) => a.id === selectedAccountId);
+
+  // Cálculo del monto exacto que se debitará de la cuenta bancaria
+  let calculatedDebitFromAccount = 0;
+  if (selectedAccount && numericAmount > 0) {
+    if (selectedAccount.currency === 'VES') {
+      calculatedDebitFromAccount =
+        depositCurrency === 'VES'
+          ? numericAmount
+          : Number((numericAmount * activeRate).toFixed(2));
+    } else {
+      calculatedDebitFromAccount =
+        depositCurrency === 'USD'
+          ? numericAmount
+          : Number((numericAmount / activeRate).toFixed(2));
+    }
+  }
 
   const handleCreateGoal = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -96,62 +134,79 @@ export function GoalsView() {
     }
   };
 
-  // ABONO A META VINCULADO AL FLUJO CONTABLE
+  // ABONO A META VINCULADO AL FLUJO CONTABLE MULTIMONEDA
   const handleDeposit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedGoal || !depositAmount) return;
-
-    const amount = parseFloat(depositAmount);
-    if (isNaN(amount) || amount <= 0) return;
+    if (!selectedGoal || numericAmount <= 0 || isSubmitting) return;
 
     try {
       setIsSubmitting(true);
       const isUser = activePayerId === currentUserId;
       const payerDisplayName = isUser ? currentUserName : partnerName;
 
-      // 1. Aumentar el progreso de la meta
-      const { success, isNowCompleted } = await depositToGoal(selectedGoal.id, amount, isUser);
+      // 1. Aumentar el progreso de la meta (en USD)
+      const result = await depositToGoal(selectedGoal.id, finalAmountInUsd, isUser);
+      const isGoalCompleted = typeof result === 'object' && result?.isNowCompleted;
 
-      if (success) {
-        // 2. Registrar el movimiento en el historial oficial de transacciones
-        await addTransaction({
-          title: `Abono: ${selectedGoal.title}`,
-          amount,
-          currency: 'USD',
-          type: 'expense',
-          ownership: 'joint',
-          paidByUserId: activePayerId,
-          categoryId: 'Ahorro',
-          accountId: selectedAccountId || undefined,
-          splitRatio: isUser ? { userA: 100, userB: 0 } : { userA: 0, userB: 100 },
-          createdAt: new Date().toISOString(),
-        });
-
-        // 3. Débito bancario automático de la cuenta seleccionada
-        if (selectedAccountId) {
-          await debitAccount(selectedAccountId, amount);
-        }
-
-        // 4. Notificación
-        if (isNowCompleted) {
-          addNotification({
-            title: '¡Meta Alcanzada! 🎉',
-            message: `¡Completaron el 100% de la meta "${selectedGoal.title}"!`,
-            type: 'goal',
-          });
-        } else {
-          addNotification({
-            title: 'Nuevo Abono a Meta 💰',
-            message: `${payerDisplayName} abonó ${formatAmount(amount)} a "${selectedGoal.title}".`,
-            type: 'goal',
-          });
-        }
-
-        setDepositAmount('');
-        setSelectedGoal(null);
-        setSelectedPayerId('');
-        setSelectedAccountId('');
+      // 2. Débito bancario exacto en la moneda nativa de la cuenta seleccionada
+      if (selectedAccountId && calculatedDebitFromAccount > 0) {
+        await debitAccount(selectedAccountId, calculatedDebitFromAccount);
+        await refetchAccounts();
       }
+
+      // 3. Registrar el movimiento oficial en el historial de transacciones
+      const savingsCategory =
+        categories.find(
+          (c) =>
+            c.name.toLowerCase().includes('ahorro') ||
+            c.name.toLowerCase().includes('meta')
+        )?.name || 'Ahorro';
+
+      await addTransaction({
+        title: `Abono: ${selectedGoal.title}`,
+        amount: finalAmountInUsd,
+        currency: 'USD',
+        type: 'expense',
+        ownership: 'joint',
+        paidByUserId: activePayerId,
+        categoryId: savingsCategory,
+        accountId: selectedAccountId || undefined,
+        splitRatio: isUser ? { userA: 100, userB: 0 } : { userA: 0, userB: 100 },
+        createdAt: new Date().toISOString(),
+      });
+
+      await refreshTransactions();
+
+      // 4. Notificación del gasto/abono realizado
+      const debitText =
+        selectedAccount
+          ? selectedAccount.currency === 'VES'
+            ? ` (Bs. ${calculatedDebitFromAccount.toLocaleString('es-VE')} debitados de ${selectedAccount.name})`
+            : ` ($${calculatedDebitFromAccount.toFixed(2)} USD debitados de ${selectedAccount.name})`
+          : '';
+
+      addNotification({
+        title: 'Nuevo Abono a Meta 💰',
+        message: `${payerDisplayName} abonó $${finalAmountInUsd.toFixed(2)} USD a "${selectedGoal.title}"${debitText}.`,
+        type: 'expense',
+      });
+
+      // 5. Notificación adicional si se alcanzó el 100% de la meta
+      if (isGoalCompleted) {
+        addNotification({
+          title: '¡Meta Alcanzada! 🎉',
+          message: `¡Completaron el 100% de la meta "${selectedGoal.title}"!`,
+          type: 'goal',
+        });
+      }
+
+      // Limpiar formulario y cerrar
+      setDepositAmount('');
+      setSelectedGoal(null);
+      setSelectedPayerId('');
+      setSelectedAccountId('');
+    } catch (err) {
+      console.error('Error al realizar abono a la meta:', err);
     } finally {
       setIsSubmitting(false);
     }
@@ -255,7 +310,15 @@ export function GoalsView() {
                       <button
                         type="button"
                         disabled={isDone}
-                        onClick={() => setSelectedGoal(goal)}
+                        onClick={() => {
+                          setSelectedGoal(goal);
+                          // Si hay una cuenta en VES, adaptar la moneda sugerida
+                          const firstVes = accounts.find((a) => a.currency === 'VES');
+                          if (firstVes && accounts.length === 1) {
+                            setSelectedAccountId(firstVes.id);
+                            setDepositCurrency('VES');
+                          }
+                        }}
                         className={`text-xs font-semibold px-3 py-1.5 rounded-xl transition-all flex items-center gap-1 cursor-pointer ${
                           isDone 
                             ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 cursor-default' 
@@ -279,10 +342,10 @@ export function GoalsView() {
 
                   <div className="mt-4 space-y-2">
                     <div className="flex items-baseline justify-between">
-                      <span className="text-lg font-extrabold text-slate-900 dark:text-white">
+                      <span className="text-lg font-extrabold text-slate-900 dark:text-white font-numeric">
                         {formatAmount(goal.currentAmount)}
                       </span>
-                      <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
+                      <span className="text-xs font-medium text-slate-500 dark:text-slate-400 font-numeric">
                         Meta: {formatAmount(goal.targetAmount)}
                       </span>
                     </div>
@@ -312,13 +375,13 @@ export function GoalsView() {
                       <div className="h-5 w-5 rounded-full bg-[#3B82F6] text-[9px] flex items-center justify-center font-bold text-white uppercase">
                         {userInitial}
                       </div>
-                      <span className="text-slate-600 dark:text-slate-400">
+                      <span className="text-slate-600 dark:text-slate-400 font-numeric">
                         {formatAmount(goal.userContribution)}
                       </span>
                     </div>
 
                     <div className="flex items-center gap-1.5">
-                      <span className="text-slate-600 dark:text-slate-400">
+                      <span className="text-slate-600 dark:text-slate-400 font-numeric">
                         {formatAmount(goal.partnerContribution)}
                       </span>
                       <div className="h-5 w-5 rounded-full bg-[#FF6B9D] text-[9px] flex items-center justify-center font-bold text-white uppercase">
@@ -365,7 +428,7 @@ export function GoalsView() {
                 <input 
                   type="text" 
                   required
-                  placeholder="Ej: Viaje a la playa, Fondo de Emergencia..."
+                  placeholder="Ej: Viaje, Fondo de Emergencia, Internet..."
                   value={newTitle}
                   onChange={(e) => setNewTitle(e.target.value)}
                   className="w-full px-3 py-2 rounded-xl text-xs bg-slate-50 dark:bg-[#0B0F17] border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/30"
@@ -446,116 +509,226 @@ export function GoalsView() {
         </div>
       )}
 
-      {/* Modal: Realizar Abono */}
+      {/* Modal: Realizar Abono con Multimoneda y Tasa en Vivo */}
       {selectedGoal && (
         <div 
-          className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4"
-          onClick={() => setSelectedGoal(null)}
+          className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200"
+          onClick={() => !isSubmitting && setSelectedGoal(null)}
         >
           <div 
-            className="bg-white dark:bg-[#161B22] border border-slate-200/80 dark:border-slate-800 rounded-2xl w-full max-w-sm p-6 space-y-4 shadow-2xl"
+            className="bg-white dark:bg-[#161B22] border border-slate-200/90 dark:border-slate-800 rounded-3xl w-full max-w-md p-6 space-y-4 shadow-2xl overflow-hidden"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
               <div>
-                <h2 className="text-sm font-bold text-slate-900 dark:text-white">
+                <h2 className="text-base font-bold text-slate-900 dark:text-white">
                   Abonar a Meta
                 </h2>
-                <p className="text-xs text-slate-500 dark:text-slate-400 truncate max-w-[200px]">
+                <p className="text-xs text-blue-600 dark:text-blue-400 font-semibold truncate max-w-[240px]">
                   {selectedGoal.title}
                 </p>
               </div>
               <button 
                 type="button"
                 onClick={() => setSelectedGoal(null)}
-                className="text-slate-400 hover:text-slate-600 dark:hover:text-white cursor-pointer"
+                disabled={isSubmitting}
+                className="p-1 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-white cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleDeposit} className="space-y-3">
+            <form onSubmit={handleDeposit} className="space-y-4">
+              {/* 1. ¿Quién realiza el abono? */}
               <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
                   ¿Quién realiza el abono?
                 </label>
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
                     onClick={() => setSelectedPayerId(currentUserId)}
-                    className={`py-2 px-3 rounded-xl text-xs font-semibold border flex items-center justify-center gap-2 cursor-pointer transition-all ${
+                    className={`py-2 px-3 rounded-xl text-xs font-bold border flex items-center justify-center gap-2 cursor-pointer transition-all ${
                       activePayerId === currentUserId
-                        ? 'border-blue-600 bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400'
-                        : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400'
+                        ? 'border-blue-500 bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 shadow-xs'
+                        : 'border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:border-slate-300'
                     }`}
                   >
+                    <div className="w-4 h-4 rounded-full bg-blue-500 text-white flex items-center justify-center text-[9px] font-black">
+                      {userInitial}
+                    </div>
                     <span>{currentUserName}</span>
                   </button>
                   <button
                     type="button"
                     onClick={() => setSelectedPayerId(partnerId)}
-                    className={`py-2 px-3 rounded-xl text-xs font-semibold border flex items-center justify-center gap-2 cursor-pointer transition-all ${
+                    className={`py-2 px-3 rounded-xl text-xs font-bold border flex items-center justify-center gap-2 cursor-pointer transition-all ${
                       activePayerId === partnerId
-                        ? 'border-pink-500 bg-pink-50 dark:bg-pink-500/10 text-pink-600 dark:text-pink-400'
-                        : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400'
+                        ? 'border-pink-500 bg-pink-50 dark:bg-pink-500/10 text-pink-600 dark:text-pink-400 shadow-xs'
+                        : 'border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:border-slate-300'
                     }`}
                   >
+                    <div className="w-4 h-4 rounded-full bg-pink-500 text-white flex items-center justify-center text-[9px] font-black">
+                      {partnerInitial}
+                    </div>
                     <span>{partnerName}</span>
                   </button>
                 </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                  Monto a Abonar ($ USD)
-                </label>
-                <input 
-                  type="number" 
-                  required
-                  step="0.01"
-                  min="1"
-                  placeholder="50.00"
-                  value={depositAmount}
-                  onChange={(e) => setDepositAmount(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl text-xs bg-slate-50 dark:bg-[#0B0F17] border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/30 font-numeric font-bold"
-                />
+              {/* 2. Monto con Selector USD / VES y Tasa en Vivo */}
+              <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-[#0B0F17] border border-slate-200/80 dark:border-slate-800 space-y-2">
+                <div className="flex items-center justify-between text-xs font-semibold text-slate-600 dark:text-slate-400">
+                  <span>Monto a Abonar</span>
+                  {depositCurrency === 'VES' && (
+                    <button
+                      type="button"
+                      onClick={refetchRates}
+                      disabled={ratesLoading}
+                      className="flex items-center gap-1 text-[11px] text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
+                    >
+                      <RefreshCw className={`w-3 h-3 ${ratesLoading ? 'animate-spin' : ''}`} />
+                      <span>Tasa: Bs. {activeRate.toFixed(2)}</span>
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <div className="relative flex-1">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                      {depositCurrency === 'USD' ? (
+                        <DollarSign className="w-4 h-4 text-emerald-500" />
+                      ) : (
+                        <span className="text-xs font-bold text-blue-500">Bs</span>
+                      )}
+                    </div>
+                    <input 
+                      type="number" 
+                      required
+                      step="0.01"
+                      min="0.01"
+                      placeholder="0.00"
+                      value={depositAmount}
+                      onChange={(e) => setDepositAmount(e.target.value)}
+                      autoFocus
+                      className="w-full pl-8 pr-2 py-1.5 text-lg font-black font-numeric text-slate-900 dark:text-white bg-transparent focus:outline-none"
+                    />
+                  </div>
+
+                  {/* Toggle Moneda USD / VES */}
+                  <div className="flex bg-slate-200/70 dark:bg-slate-800 p-1 rounded-xl shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setDepositCurrency('USD')}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                        depositCurrency === 'USD'
+                          ? 'bg-white dark:bg-[#161B22] text-blue-600 dark:text-blue-400 shadow-xs'
+                          : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                      }`}
+                    >
+                      USD
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDepositCurrency('VES')}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                        depositCurrency === 'VES'
+                          ? 'bg-white dark:bg-[#161B22] text-blue-600 dark:text-blue-400 shadow-xs'
+                          : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                      }`}
+                    >
+                      VES
+                    </button>
+                  </div>
+                </div>
+
+                {/* Fila de conversión si se usa VES */}
+                {depositCurrency === 'VES' && (
+                  <div className="pt-2 border-t border-slate-200/60 dark:border-slate-800/80 flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-slate-400 text-[10px]">Tasa:</span>
+                      <div className="flex gap-1">
+                        <button
+                          type="button"
+                          onClick={() => setRateType('bcv')}
+                          className={`px-1.5 py-0.5 rounded text-[10px] font-bold cursor-pointer ${
+                            rateType === 'bcv'
+                              ? 'bg-blue-500/20 text-blue-600 dark:text-blue-400 border border-blue-500/30'
+                              : 'text-slate-400'
+                          }`}
+                        >
+                          BCV
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setRateType('binance')}
+                          className={`px-1.5 py-0.5 rounded text-[10px] font-bold cursor-pointer ${
+                            rateType === 'binance'
+                              ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30'
+                              : 'text-slate-400'
+                          }`}
+                        >
+                          Binance
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-1 text-slate-800 dark:text-slate-200 font-bold font-numeric text-xs">
+                      <ArrowLeftRight className="w-3 h-3 text-blue-500" />
+                      <span>≈ ${finalAmountInUsd.toFixed(2)} USD para la meta</span>
+                    </div>
+                  </div>
+                )}
               </div>
 
+              {/* 3. Descontar de Cuenta / Billetera */}
               <div>
-                <label className="flex items-center gap-1 text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                  <CreditCard className="w-3.5 h-3.5" />
-                  <span>Descontar de Cuenta / Billetera</span>
+                <label className="flex items-center gap-1 text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                  <CreditCard className="w-3.5 h-3.5 text-blue-500" />
+                  <span>Descontar de Cuenta o Billetera</span>
                 </label>
                 <select
                   value={selectedAccountId}
                   onChange={(e) => setSelectedAccountId(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl text-xs bg-slate-50 dark:bg-[#0B0F17] border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/30 cursor-pointer"
+                  className="w-full px-3 py-2.5 rounded-xl text-xs bg-slate-50 dark:bg-[#0B0F17] border border-slate-200/80 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/30 cursor-pointer font-medium"
                 >
-                  <option value="">Abono manual (Sin descontar de cuenta)</option>
+                  <option value="">Abono manual (Sin descontar de ninguna cuenta)</option>
                   {accounts.map((acc) => (
                     <option key={acc.id} value={acc.id}>
-                      {acc.name} (${acc.balance.toFixed(2)} {acc.currency})
+                      {acc.name} — Saldo: {acc.currency === 'VES' ? 'Bs.' : '$'}{acc.balance.toLocaleString('es-VE', { minimumFractionDigits: 2 })} {acc.currency}
                     </option>
                   ))}
                 </select>
+
+                {/* Resumen explicativo del débito */}
+                {selectedAccount && numericAmount > 0 && (
+                  <div className="mt-2 p-2.5 rounded-xl bg-blue-50/80 dark:bg-blue-500/10 border border-blue-200/60 dark:border-blue-500/20 text-[11px] text-blue-700 dark:text-blue-300 flex items-center justify-between">
+                    <span>Se debitará de {selectedAccount.name}:</span>
+                    <strong className="font-numeric font-bold">
+                      {selectedAccount.currency === 'VES'
+                        ? `Bs. ${calculatedDebitFromAccount.toLocaleString('es-VE', { minimumFractionDigits: 2 })}`
+                        : `$${calculatedDebitFromAccount.toFixed(2)} USD`}
+                    </strong>
+                  </div>
+                )}
               </div>
 
-              <div className="pt-2 flex justify-end gap-2">
+              <div className="pt-2 flex justify-end gap-2 border-t border-slate-100 dark:border-slate-800">
                 <button
                   type="button"
                   onClick={() => setSelectedGoal(null)}
                   disabled={isSubmitting}
-                  className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                  className="px-4 py-2.5 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer disabled:opacity-50"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
-                  disabled={isSubmitting}
-                  className="px-4 py-2 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white shadow-sm cursor-pointer flex items-center gap-1.5"
+                  disabled={isSubmitting || numericAmount <= 0}
+                  className="px-5 py-2.5 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white shadow-md shadow-blue-500/20 active:scale-95 cursor-pointer flex items-center gap-1.5 disabled:opacity-50 disabled:pointer-events-none"
                 >
                   {isSubmitting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                  <span>Confirmar Abono</span>
+                  <span>{isSubmitting ? 'Abonando...' : 'Confirmar Abono'}</span>
                 </button>
               </div>
             </form>
