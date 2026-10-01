@@ -1,8 +1,24 @@
-import React, { useState, useRef } from 'react';
-import { X, DollarSign, Tag, User, CreditCard, PieChart, ArrowLeftRight, RefreshCw, ImagePlus, Loader2 } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
+import { 
+  X, 
+  DollarSign, 
+  Tag, 
+  User, 
+  CreditCard, 
+  PieChart, 
+  ArrowLeftRight, 
+  RefreshCw, 
+  Paperclip, 
+  Loader2, 
+  Calendar,
+  Check,
+  Image as ImageIcon
+} from 'lucide-react';
 import { useCoupleProfiles } from '@/hooks/useCoupleProfiles';
 import { useAccounts } from '@/components/accounts/useAccounts';
 import { useExchangeRates } from '@/hooks/useExchangeRates';
+import { useCategories } from '@/hooks/useCategories';
 import { uploadReceipt } from '@/utils/uploadReceipt';
 import type { SplitRatio } from '@/types';
 
@@ -25,36 +41,73 @@ interface NewTransactionModalProps {
 export function NewTransactionModal({ isOpen, onClose, onSubmit }: NewTransactionModalProps) {
   const { currentUser, partner } = useCoupleProfiles();
   const { accounts } = useAccounts();
-  const { rates, isLoading, refetch } = useExchangeRates();
+  const { rates, isLoading: ratesLoading, refetch: refetchRates } = useExchangeRates();
+  const { categories } = useCategories();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Estados del formulario
   const [title, setTitle] = useState('');
   const [amount, setAmount] = useState('');
   const [selectedPayerId, setSelectedPayerId] = useState<string>('');
-  const [category, setCategory] = useState('Comida');
+  const [category, setCategory] = useState('');
   const [accountId, setAccountId] = useState<string>('');
   const [currency, setCurrency] = useState<'USD' | 'VES'>('USD');
   const [rateType, setRateType] = useState<'binance' | 'bcv'>('binance');
   const [splitType, setSplitType] = useState<'50/50' | '100_USER' | '100_PARTNER'>('50/50');
+  const [expenseDate, setExpenseDate] = useState(() => new Date().toISOString().substring(0, 10));
 
-  // Estado del comprobante
+  // Comprobante
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
   const [receiptPreview, setReceiptPreview] = useState<string | null>(null);
-  const [isUploading, setIsUploading] = useState(false);
+
+  // Estados de proceso
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showSuccessToast, setShowSuccessToast] = useState(false);
+
+  // Asignar primera categoría disponible si no hay ninguna seleccionada
+  useEffect(() => {
+    if (!category && categories.length > 0) {
+      setCategory(categories[0].name);
+    }
+  }, [categories, category]);
+
+  // Cerrar con tecla Escape
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isOpen && !isSubmitting) {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, isSubmitting, onClose]);
 
   if (!isOpen) return null;
 
+  // Datos dinámicos de los participantes
   const currentUserId = currentUser?.id || '';
   const partnerId = partner?.id || '';
   const currentUserName = currentUser?.name ? currentUser.name.split(' ')[0] : 'Tú';
   const partnerName = partner?.name ? partner.name.split(' ')[0] : 'Pareja';
 
+  const userInitial = currentUser?.name ? currentUser.name[0].toUpperCase() : 'U';
+  const partnerInitial = partner?.name ? partner.name[0].toUpperCase() : 'P';
+
   const activePayerId = selectedPayerId || currentUserId;
   const activeAccountId = accountId || (accounts[0]?.id ?? '');
+  const activeCategory = category || (categories[0]?.name ?? 'General');
 
+  // Cálculos de conversión de moneda
   const numericAmount = parseFloat(amount) || 0;
   const activeRate = (rateType === 'bcv' ? rates.bcvUsd : rates.binanceUsdt) || 36.5;
+
+  const finalAmountInUsd =
+    currency === 'VES'
+      ? numericAmount > 0
+        ? Number((numericAmount / activeRate).toFixed(2))
+        : 0
+      : numericAmount;
 
   const equivalentCalculated =
     currency === 'VES'
@@ -63,6 +116,7 @@ export function NewTransactionModal({ isOpen, onClose, onSubmit }: NewTransactio
         : '0.00'
       : (numericAmount * activeRate).toFixed(2);
 
+  // Manejo de archivo comprobante
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -77,115 +131,163 @@ export function NewTransactionModal({ isOpen, onClose, onSubmit }: NewTransactio
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
+  // Envío del formulario
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title || numericAmount <= 0) return;
+    if (!title.trim() || numericAmount <= 0 || isSubmitting) return;
 
-    setIsUploading(true);
+    try {
+      setIsSubmitting(true);
 
-    let uploadedUrl: string | undefined = undefined;
-    if (receiptFile) {
-      const url = await uploadReceipt(receiptFile);
-      if (url) uploadedUrl = url;
+      let uploadedUrl: string | undefined = undefined;
+      if (receiptFile) {
+        const url = await uploadReceipt(receiptFile);
+        if (url) uploadedUrl = url;
+      }
+
+      let splitRatio: SplitRatio = { userA: 50, userB: 50 };
+      if (splitType === '100_USER') {
+        splitRatio = { userA: 100, userB: 0 };
+      } else if (splitType === '100_PARTNER') {
+        splitRatio = { userA: 0, userB: 100 };
+      }
+
+      // Combinar fecha seleccionada con hora actual
+      const selectedDateTime = new Date(expenseDate);
+      const now = new Date();
+      selectedDateTime.setHours(now.getHours(), now.getMinutes(), now.getSeconds());
+
+      onSubmit({
+        title: title.trim(),
+        amount: finalAmountInUsd,
+        paidByUserId: activePayerId,
+        category: activeCategory,
+        accountId: activeAccountId || undefined,
+        currency: 'USD',
+        splitRatio,
+        receiptUrl: uploadedUrl,
+        createdAt: selectedDateTime.toISOString(),
+      });
+
+      setShowSuccessToast(true);
+      setTimeout(() => {
+        setShowSuccessToast(false);
+        // Limpiar estado
+        setTitle('');
+        setAmount('');
+        setSelectedPayerId('');
+        handleRemoveReceipt();
+        onClose();
+      }, 700);
+    } catch (err) {
+      console.error('Error al registrar gasto:', err);
+      setIsSubmitting(false);
     }
-
-    const finalAmountInUsd =
-      currency === 'VES' ? Number((numericAmount / activeRate).toFixed(2)) : numericAmount;
-
-    let splitRatio: SplitRatio = { userA: 50, userB: 50 };
-    if (splitType === '100_USER') {
-      splitRatio = { userA: 100, userB: 0 };
-    } else if (splitType === '100_PARTNER') {
-      splitRatio = { userA: 0, userB: 100 };
-    }
-
-    onSubmit({
-      title: title.trim(),
-      amount: finalAmountInUsd,
-      paidByUserId: activePayerId,
-      category,
-      accountId: activeAccountId || undefined,
-      currency: 'USD',
-      splitRatio,
-      receiptUrl: uploadedUrl,
-      createdAt: new Date().toISOString(),
-    });
-
-    setIsUploading(false);
-    setTitle('');
-    setAmount('');
-    setSelectedPayerId('');
-    handleRemoveReceipt();
-    onClose();
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs transition-opacity">
+  // Contenido del modal montado en Portal
+  const modalContent = (
+    <div 
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/70 backdrop-blur-xs transition-opacity animate-in fade-in duration-200"
+      onClick={() => !isSubmitting && onClose()}
+    >
       <div
-        className="w-full max-w-md bg-white dark:bg-[#161B22] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl shadow-2xl p-6 transition-all max-h-[90vh] overflow-y-auto"
+        className="w-full max-w-lg bg-white dark:bg-[#161B22] border border-slate-200/90 dark:border-slate-800 rounded-2xl sm:rounded-3xl shadow-2xl overflow-hidden transition-all max-h-[92vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800/80">
-          <h2 className="text-base font-bold text-slate-900 dark:text-white tracking-tight">
-            Añadir Nuevo Gasto
-          </h2>
+        {/* Cabecera */}
+        <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0">
+          <div>
+            <h2 className="text-base font-bold text-slate-900 dark:text-white tracking-tight">
+              Registrar Gasto
+            </h2>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400">
+              Añade un pago individual o compartido
+            </p>
+          </div>
           <button
             onClick={onClose}
             type="button"
-            className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/60 transition-all cursor-pointer"
+            disabled={isSubmitting}
+            className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all cursor-pointer disabled:opacity-50"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="mt-5 space-y-4">
-          {/* Monto y Moneda */}
-          <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wider">
-                Monto y Moneda
-              </label>
-              <button
-                type="button"
-                onClick={refetch}
-                disabled={isLoading}
-                className="text-[10px] text-slate-400 hover:text-blue-400 flex items-center gap-1 transition-colors cursor-pointer"
-              >
-                <RefreshCw className={`w-3 h-3 ${isLoading ? 'animate-spin text-blue-400' : ''}`} />
-                <span>Tasa: Bs. {activeRate.toFixed(2)}</span>
-              </button>
+        {/* Formulario scrolleable */}
+        <form onSubmit={handleSubmit} className="p-5 space-y-4 overflow-y-auto flex-1">
+          {/* 1. Monto & Moneda (Hero Input) */}
+          <div className="p-4 rounded-2xl bg-slate-50 dark:bg-[#0B0F17] border border-slate-200/80 dark:border-slate-800/80 space-y-2.5">
+            <div className="flex items-center justify-between text-xs font-semibold text-slate-500 dark:text-slate-400">
+              <span>Monto del Gasto</span>
+              {currency === 'VES' && (
+                <button
+                  type="button"
+                  onClick={refetchRates}
+                  disabled={ratesLoading}
+                  className="flex items-center gap-1 text-[11px] text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
+                >
+                  <RefreshCw className={`w-3 h-3 ${ratesLoading ? 'animate-spin' : ''}`} />
+                  <span>Tasa: Bs. {activeRate.toFixed(2)}</span>
+                </button>
+              )}
             </div>
 
-            <div className="flex gap-2">
+            <div className="flex items-center gap-2">
               <div className="relative flex-1">
                 <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
-                  {currency === 'USD' ? <DollarSign className="w-4 h-4" /> : <span className="text-xs font-bold pl-0.5">Bs</span>}
+                  {currency === 'USD' ? (
+                    <DollarSign className="w-5 h-5 text-emerald-500" />
+                  ) : (
+                    <span className="text-xs font-bold text-blue-500">Bs</span>
+                  )}
                 </div>
                 <input
                   type="number"
                   step="0.01"
+                  min="0.01"
                   placeholder="0.00"
                   value={amount}
                   onChange={(e) => setAmount(e.target.value)}
+                  autoFocus
                   required
-                  className="w-full pl-9 pr-4 py-2.5 bg-slate-50 dark:bg-[#0B0F17] border border-slate-200/80 dark:border-slate-800 rounded-xl text-sm font-bold font-numeric text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 transition-all"
+                  className="w-full pl-9 pr-3 py-2 text-xl font-black font-numeric text-slate-900 dark:text-white bg-transparent focus:outline-none placeholder-slate-300 dark:placeholder-slate-700"
                 />
               </div>
 
-              <select
-                value={currency}
-                onChange={(e) => setCurrency(e.target.value as 'USD' | 'VES')}
-                className="w-24 px-3 py-2.5 bg-slate-50 dark:bg-[#0B0F17] border border-slate-200/80 dark:border-slate-800 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/30 cursor-pointer"
-              >
-                <option value="USD">USD ($)</option>
-                <option value="VES">VES (Bs)</option>
-              </select>
+              {/* Selector de moneda */}
+              <div className="flex bg-slate-200/70 dark:bg-slate-800 p-1 rounded-xl shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setCurrency('USD')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    currency === 'USD'
+                      ? 'bg-white dark:bg-[#161B22] text-blue-600 dark:text-blue-400 shadow-xs'
+                      : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                  }`}
+                >
+                  USD
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCurrency('VES')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    currency === 'VES'
+                      ? 'bg-white dark:bg-[#161B22] text-blue-600 dark:text-blue-400 shadow-xs'
+                      : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                  }`}
+                >
+                  VES
+                </button>
+              </div>
             </div>
 
+            {/* Fila de conversión si se usa VES */}
             {currency === 'VES' && (
-              <div className="mt-2.5 p-2.5 rounded-xl bg-slate-100 dark:bg-[#0B0F17] border border-slate-200/60 dark:border-slate-800/80 flex items-center justify-between text-xs">
+              <div className="pt-2 border-t border-slate-200/60 dark:border-slate-800/80 flex items-center justify-between text-xs">
                 <div className="flex items-center gap-1.5">
-                  <span className="text-slate-500 dark:text-slate-400 font-medium">Usar Tasa:</span>
+                  <span className="text-slate-400 text-[11px]">Tasa:</span>
                   <div className="flex gap-1">
                     <button
                       type="button"
@@ -211,18 +313,18 @@ export function NewTransactionModal({ isOpen, onClose, onSubmit }: NewTransactio
                     </button>
                   </div>
                 </div>
-                <div className="flex items-center gap-1 text-slate-700 dark:text-slate-300 font-bold">
-                  <ArrowLeftRight className="w-3 h-3 text-blue-400" />
-                  <span>${equivalentCalculated} USD</span>
+                <div className="flex items-center gap-1 text-slate-800 dark:text-slate-200 font-bold font-numeric">
+                  <ArrowLeftRight className="w-3.5 h-3.5 text-blue-500" />
+                  <span>≈ ${equivalentCalculated} USD</span>
                 </div>
               </div>
             )}
           </div>
 
-          {/* Concepto */}
+          {/* 2. Concepto */}
           <div>
             <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-1.5">
-              Concepto / Descripción
+              Concepto / Título
             </label>
             <div className="relative">
               <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
@@ -230,54 +332,60 @@ export function NewTransactionModal({ isOpen, onClose, onSubmit }: NewTransactio
               </div>
               <input
                 type="text"
-                placeholder="Ej. Mercado semanal, Farmatodo, Cena..."
+                placeholder="Ej. Supermercado, Cena, Gasolina..."
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 required
-                className="w-full pl-9 pr-4 py-2.5 bg-slate-50 dark:bg-[#0B0F17] border border-slate-200/80 dark:border-slate-800 rounded-xl text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 transition-all"
+                className="w-full pl-9 pr-4 py-2.5 bg-slate-50 dark:bg-[#0B0F17] border border-slate-200/80 dark:border-slate-800 rounded-xl text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/30 transition-all"
               />
             </div>
           </div>
 
-          {/* Quién Pagó */}
+          {/* 3. Quién Pagó */}
           <div>
-            <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-1.5">
-              ¿Quién pagó?
+            <label className="flex items-center gap-1 text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-1.5">
+              <User className="w-3.5 h-3.5 text-slate-400" />
+              <span>¿Quién pagó el gasto?</span>
             </label>
             <div className="grid grid-cols-2 gap-2">
               <button
                 type="button"
                 onClick={() => setSelectedPayerId(currentUserId)}
-                className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl border text-xs font-semibold transition-all cursor-pointer ${
+                className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
                   activePayerId === currentUserId
-                    ? 'bg-blue-50 dark:bg-blue-500/10 border-blue-500/50 text-blue-600 dark:text-blue-400 shadow-xs'
-                    : 'bg-slate-50 dark:bg-[#0B0F17] border-slate-200/80 dark:border-slate-800 text-slate-600 dark:text-slate-400'
+                    ? 'bg-blue-50 dark:bg-blue-500/10 border-blue-500 text-blue-600 dark:text-blue-400 shadow-xs'
+                    : 'bg-slate-50 dark:bg-[#0B0F17] border-slate-200/80 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:border-slate-300'
                 }`}
               >
-                <User className="w-3.5 h-3.5" />
+                <div className="w-5 h-5 rounded-full bg-blue-500 text-white flex items-center justify-center text-[10px] font-black">
+                  {userInitial}
+                </div>
                 <span>{currentUserName}</span>
               </button>
+
               <button
                 type="button"
                 onClick={() => setSelectedPayerId(partnerId)}
-                className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl border text-xs font-semibold transition-all cursor-pointer ${
+                className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
                   activePayerId === partnerId
-                    ? 'bg-pink-50 dark:bg-pink-500/10 border-pink-500/50 text-pink-600 dark:text-pink-400 shadow-xs'
-                    : 'bg-slate-50 dark:bg-[#0B0F17] border-slate-200/80 dark:border-slate-800 text-slate-600 dark:text-slate-400'
+                    ? 'bg-pink-50 dark:bg-pink-500/10 border-pink-500 text-pink-600 dark:text-pink-400 shadow-xs'
+                    : 'bg-slate-50 dark:bg-[#0B0F17] border-slate-200/80 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:border-slate-300'
                 }`}
               >
-                <User className="w-3.5 h-3.5" />
+                <div className="w-5 h-5 rounded-full bg-pink-500 text-white flex items-center justify-center text-[10px] font-black">
+                  {partnerInitial}
+                </div>
                 <span>{partnerName}</span>
               </button>
             </div>
           </div>
 
-          {/* Cuenta Origen y Categoría */}
-          <div className="grid grid-cols-2 gap-3">
+          {/* 4. Cuenta y Categoría (2 columnas) */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="flex items-center gap-1 text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-1.5">
                 <CreditCard className="w-3.5 h-3.5" />
-                <span>Cuenta</span>
+                <span>Cuenta Origen</span>
               </label>
               <select
                 value={activeAccountId}
@@ -285,7 +393,7 @@ export function NewTransactionModal({ isOpen, onClose, onSubmit }: NewTransactio
                 className="w-full px-3 py-2.5 bg-slate-50 dark:bg-[#0B0F17] border border-slate-200/80 dark:border-slate-800 rounded-xl text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/30 cursor-pointer"
               >
                 {accounts.length === 0 ? (
-                  <option value="">General / Efectivo</option>
+                  <option value="">Efectivo / General</option>
                 ) : (
                   accounts.map((acc) => (
                     <option key={acc.id} value={acc.id}>
@@ -301,34 +409,47 @@ export function NewTransactionModal({ isOpen, onClose, onSubmit }: NewTransactio
                 Categoría
               </label>
               <select
-                value={category}
+                value={activeCategory}
                 onChange={(e) => setCategory(e.target.value)}
                 className="w-full px-3 py-2.5 bg-slate-50 dark:bg-[#0B0F17] border border-slate-200/80 dark:border-slate-800 rounded-xl text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/30 cursor-pointer"
               >
-                <option value="Comida">Comida / Mercado</option>
-                <option value="Hogar">Hogar & Luz</option>
-                <option value="Servicios">Servicios / Suscripciones</option>
-                <option value="Entretenimiento">Entretenimiento / Citas</option>
-                <option value="Salud">Salud & Cuidado</option>
-                <option value="Transporte">Transporte / Gasolina</option>
+                {categories.length === 0 ? (
+                  <option value="General">General</option>
+                ) : (
+                  categories.map((cat) => (
+                    <option key={cat.id} value={cat.name}>
+                      {cat.name}
+                    </option>
+                  ))
+                )}
               </select>
             </div>
           </div>
 
-          {/* Tipo de División */}
-          <div>
-            <label className="flex items-center gap-1 text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-1.5">
-              <PieChart className="w-3.5 h-3.5" />
-              <span>División del Gasto</span>
-            </label>
+          {/* 5. División del Gasto con Desglose en Vivo */}
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <label className="flex items-center gap-1 text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wider">
+                <PieChart className="w-3.5 h-3.5 text-blue-500" />
+                <span>División del Gasto</span>
+              </label>
+              {numericAmount > 0 && (
+                <span className="text-[11px] font-bold text-blue-600 dark:text-blue-400 font-numeric">
+                  {splitType === '50/50' && `$${(finalAmountInUsd / 2).toFixed(2)} c/u`}
+                  {splitType === '100_USER' && `${currentUserName} asume $${finalAmountInUsd.toFixed(2)}`}
+                  {splitType === '100_PARTNER' && `${partnerName} asume $${finalAmountInUsd.toFixed(2)}`}
+                </span>
+              )}
+            </div>
+
             <div className="grid grid-cols-3 gap-1.5 bg-slate-100 dark:bg-[#0B0F17] p-1 rounded-xl">
               <button
                 type="button"
                 onClick={() => setSplitType('50/50')}
-                className={`py-1.5 text-[11px] font-bold rounded-lg transition-all cursor-pointer ${
+                className={`py-2 text-[11px] font-bold rounded-lg transition-all cursor-pointer ${
                   splitType === '50/50'
                     ? 'bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 shadow-xs'
-                    : 'text-slate-500 dark:text-slate-400'
+                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-800'
                 }`}
               >
                 50 / 50
@@ -336,10 +457,10 @@ export function NewTransactionModal({ isOpen, onClose, onSubmit }: NewTransactio
               <button
                 type="button"
                 onClick={() => setSplitType('100_USER')}
-                className={`py-1.5 text-[11px] font-bold rounded-lg transition-all cursor-pointer ${
+                className={`py-2 text-[11px] font-bold rounded-lg transition-all cursor-pointer ${
                   splitType === '100_USER'
                     ? 'bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 shadow-xs'
-                    : 'text-slate-500 dark:text-slate-400'
+                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-800'
                 }`}
               >
                 Solo {currentUserName}
@@ -347,10 +468,10 @@ export function NewTransactionModal({ isOpen, onClose, onSubmit }: NewTransactio
               <button
                 type="button"
                 onClick={() => setSplitType('100_PARTNER')}
-                className={`py-1.5 text-[11px] font-bold rounded-lg transition-all cursor-pointer ${
+                className={`py-2 text-[11px] font-bold rounded-lg transition-all cursor-pointer ${
                   splitType === '100_PARTNER'
                     ? 'bg-white dark:bg-slate-800 text-pink-600 dark:text-pink-400 shadow-xs'
-                    : 'text-slate-500 dark:text-slate-400'
+                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-800'
                 }`}
               >
                 Solo {partnerName}
@@ -358,67 +479,96 @@ export function NewTransactionModal({ isOpen, onClose, onSubmit }: NewTransactio
             </div>
           </div>
 
-          {/* Adjuntar Comprobante */}
-          <div>
-            <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-1.5">
-              Comprobante / Captura (Opcional)
-            </label>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={handleFileChange}
-            />
+          {/* 6. Fecha y Comprobante (Fila Secundaria Limpia) */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+            {/* Fecha */}
+            <div>
+              <label className="flex items-center gap-1 text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-1.5">
+                <Calendar className="w-3.5 h-3.5" />
+                <span>Fecha</span>
+              </label>
+              <input
+                type="date"
+                value={expenseDate}
+                onChange={(e) => setExpenseDate(e.target.value)}
+                className="w-full px-3 py-2 bg-slate-50 dark:bg-[#0B0F17] border border-slate-200/80 dark:border-slate-800 rounded-xl text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/30 cursor-pointer"
+              />
+            </div>
 
-            {!receiptPreview ? (
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className="w-full py-3 px-4 border border-dashed border-slate-300 dark:border-slate-700 rounded-xl flex items-center justify-center gap-2 text-xs font-semibold text-slate-600 dark:text-slate-400 hover:border-blue-500 hover:text-blue-500 transition-colors cursor-pointer"
-              >
-                <ImagePlus className="w-4 h-4" />
-                <span>Subir comprobante o captura de pago</span>
-              </button>
-            ) : (
-              <div className="relative inline-block mt-1">
-                <img
-                  src={receiptPreview}
-                  alt="Vista previa del comprobante"
-                  className="w-20 h-20 object-cover rounded-xl border border-slate-200 dark:border-slate-700"
-                />
+            {/* Comprobante Opcional (Botón Compacto) */}
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-1.5">
+                Comprobante (Opcional)
+              </label>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handleFileChange}
+              />
+
+              {!receiptPreview ? (
                 <button
                   type="button"
-                  onClick={handleRemoveReceipt}
-                  className="absolute -top-2 -right-2 bg-rose-500 text-white p-1 rounded-full hover:bg-rose-600 shadow-md cursor-pointer"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="w-full py-2 px-3 border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-[#0B0F17] hover:bg-slate-100 dark:hover:bg-slate-800/60 rounded-xl flex items-center justify-center gap-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300 transition-colors cursor-pointer"
                 >
-                  <X className="w-3 h-3" />
+                  <Paperclip className="w-3.5 h-3.5 text-slate-400" />
+                  <span>Adjuntar captura</span>
                 </button>
-              </div>
-            )}
+              ) : (
+                <div className="flex items-center justify-between p-1.5 px-2 bg-blue-50 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/30 rounded-xl">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <ImageIcon className="w-4 h-4 text-blue-500 shrink-0" />
+                    <span className="text-[11px] font-bold text-blue-600 dark:text-blue-400 truncate">
+                      {receiptFile?.name || 'Comprobante adjunto'}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleRemoveReceipt}
+                    className="p-1 text-slate-400 hover:text-rose-500 transition-colors cursor-pointer"
+                    title="Eliminar comprobante"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
 
-          {/* Botones */}
-          <div className="pt-3 flex items-center justify-end gap-3">
+          {/* Feedback de Éxito */}
+          {showSuccessToast && (
+            <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl flex items-center gap-2 text-emerald-600 dark:text-emerald-400 text-xs font-bold animate-in fade-in">
+              <Check className="w-4 h-4" />
+              <span>¡Gasto registrado correctamente!</span>
+            </div>
+          )}
+
+          {/* Botones de Acción */}
+          <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-end gap-3">
             <button
               type="button"
               onClick={onClose}
-              disabled={isUploading}
-              className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/60 transition-all cursor-pointer disabled:opacity-50"
+              disabled={isSubmitting}
+              className="px-4 py-2.5 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all cursor-pointer disabled:opacity-50"
             >
               Cancelar
             </button>
             <button
               type="submit"
-              disabled={isUploading}
-              className="px-5 py-2 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white shadow-md shadow-blue-500/20 active:scale-95 transition-all cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
+              disabled={isSubmitting || numericAmount <= 0 || !title.trim()}
+              className="px-6 py-2.5 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white shadow-md shadow-blue-500/20 active:scale-95 transition-all cursor-pointer flex items-center gap-2 disabled:opacity-50 disabled:pointer-events-none"
             >
-              {isUploading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-              <span>Guardar Gasto</span>
+              {isSubmitting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+              <span>{isSubmitting ? 'Guardando...' : 'Guardar Gasto'}</span>
             </button>
           </div>
         </form>
       </div>
     </div>
   );
+
+  return typeof document !== 'undefined' ? createPortal(modalContent, document.body) : null;
 }

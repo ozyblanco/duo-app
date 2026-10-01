@@ -3,6 +3,7 @@ import { X, DollarSign, Tag, User, CreditCard, PieChart, ArrowLeftRight, Refresh
 import { useCoupleProfiles } from '@/hooks/useCoupleProfiles';
 import { useAccounts } from '@/components/accounts/useAccounts';
 import { useExchangeRates } from '@/hooks/useExchangeRates';
+import { useCategories } from '@/hooks/useCategories';
 import { uploadReceipt } from '@/utils/uploadReceipt';
 import type { Transaction, SplitRatio } from '@/types';
 
@@ -17,13 +18,14 @@ export function EditTransactionModal({ transaction, isOpen, onClose, onUpdate }:
   const { currentUser, partner } = useCoupleProfiles();
   const { accounts } = useAccounts();
   const { rates, isLoading: ratesLoading, refetch } = useExchangeRates();
+  const { categories } = useCategories();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [title, setTitle] = useState(transaction?.title || '');
   const [amount, setAmount] = useState(transaction ? String(transaction.amount) : '');
   const [selectedPayerId, setSelectedPayerId] = useState(transaction?.paidByUserId || '');
-  const [category, setCategory] = useState(transaction?.categoryId || transaction?.category || 'Comida');
+  const [category, setCategory] = useState(transaction?.categoryId || transaction?.category || (categories[0]?.name ?? 'General'));
   const [accountId, setAccountId] = useState(transaction?.accountId || '');
   const [currency, setCurrency] = useState<'USD' | 'VES'>('USD');
   const [rateType, setRateType] = useState<'binance' | 'bcv'>('binance');
@@ -37,7 +39,6 @@ export function EditTransactionModal({ transaction, isOpen, onClose, onUpdate }:
     return new Date().toISOString().substring(0, 10);
   });
 
-  // Comprobante
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
   const [receiptPreview, setReceiptPreview] = useState<string | null>(transaction?.receiptUrl || null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -303,12 +304,15 @@ export function EditTransactionModal({ transaction, isOpen, onClose, onUpdate }:
                 onChange={(e) => setCategory(e.target.value)}
                 className="w-full px-3 py-2.5 bg-slate-50 dark:bg-[#0B0F17] border border-slate-200/80 dark:border-slate-800 rounded-xl text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/30 cursor-pointer"
               >
-                <option value="Comida">Comida / Mercado</option>
-                <option value="Hogar">Hogar & Luz</option>
-                <option value="Servicios">Servicios / Suscripciones</option>
-                <option value="Entretenimiento">Entretenimiento / Citas</option>
-                <option value="Salud">Salud & Cuidado</option>
-                <option value="Transporte">Transporte / Gasolina</option>
+                {categories.length === 0 ? (
+                  <option value="General">General</option>
+                ) : (
+                  categories.map((cat) => (
+                    <option key={cat.id} value={cat.name}>
+                      {cat.name}
+                    </option>
+                  ))
+                )}
               </select>
             </div>
           </div>

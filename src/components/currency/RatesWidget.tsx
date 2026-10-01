@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { RefreshCw, DollarSign, TrendingUp } from 'lucide-react';
+import { RefreshCw, DollarSign, ArrowRightLeft } from 'lucide-react';
 import { useExchangeRates } from '@/hooks/useExchangeRates';
 
 export function RatesWidget() {
@@ -16,64 +16,68 @@ export function RatesWidget() {
   const calculatedVes = (Number(amountUsd) || 0) * getActiveRate();
 
   return (
-    <div className="p-4 rounded-2xl bg-gradient-to-br from-slate-900 via-slate-900 to-blue-950 text-white space-y-4 shadow-lg border border-slate-800">
+    <div className="p-4 rounded-2xl bg-slate-900 dark:bg-[#161B22] text-white border border-slate-800 space-y-3 shadow-xs">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <TrendingUp className="w-4 h-4 text-emerald-400" />
+          <ArrowRightLeft className="w-4 h-4 text-blue-400" />
           <span className="text-xs font-bold tracking-wide uppercase text-slate-300">
-            Tasas de Cambio VES
+            Tasas de Cambio Referenciales (VES)
           </span>
         </div>
         <button 
+          type="button"
           onClick={refetch}
           disabled={isLoading}
           className="text-[10px] text-slate-400 hover:text-slate-200 flex items-center gap-1 cursor-pointer transition-colors"
           title="Actualizar tasas"
         >
           <RefreshCw className={`w-3 h-3 ${isLoading ? 'animate-spin text-blue-400' : ''}`} />
-          {rates.lastUpdated}
+          <span>{rates.lastUpdated}</span>
         </button>
       </div>
 
       <div className="grid grid-cols-3 gap-2">
         <button
+          type="button"
           onClick={() => setSelectedRate('binance')}
-          className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+          className={`p-2 rounded-xl border text-left transition-all cursor-pointer ${
             selectedRate === 'binance'
-              ? 'bg-blue-600/30 border-blue-500 text-white'
+              ? 'bg-blue-600/20 border-blue-500/50 text-white'
               : 'bg-slate-800/40 border-slate-700/60 text-slate-400 hover:border-slate-600'
           }`}
         >
-          <div className="text-[10px] font-semibold text-slate-400">Paralelo / P2P</div>
-          <div className="text-sm font-black text-emerald-400 mt-0.5">
+          <div className="text-[10px] font-medium text-slate-400">Binance P2P</div>
+          <div className="text-xs font-black text-emerald-400 font-numeric mt-0.5">
             Bs. {rates.binanceUsdt.toFixed(2)}
           </div>
         </button>
 
         <button
+          type="button"
           onClick={() => setSelectedRate('bcv')}
-          className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+          className={`p-2 rounded-xl border text-left transition-all cursor-pointer ${
             selectedRate === 'bcv'
-              ? 'bg-blue-600/30 border-blue-500 text-white'
+              ? 'bg-blue-600/20 border-blue-500/50 text-white'
               : 'bg-slate-800/40 border-slate-700/60 text-slate-400 hover:border-slate-600'
           }`}
         >
-          <div className="text-[10px] font-semibold text-slate-400">BCV $</div>
-          <div className="text-sm font-black text-blue-400 mt-0.5">
+          <div className="text-[10px] font-medium text-slate-400">BCV Oficial</div>
+          <div className="text-xs font-black text-blue-400 font-numeric mt-0.5">
             Bs. {rates.bcvUsd.toFixed(2)}
           </div>
         </button>
 
         <button
+          type="button"
           onClick={() => setSelectedRate('eur')}
-          className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+          className={`p-2 rounded-xl border text-left transition-all cursor-pointer ${
             selectedRate === 'eur'
-              ? 'bg-blue-600/30 border-blue-500 text-white'
+              ? 'bg-blue-600/20 border-blue-500/50 text-white'
               : 'bg-slate-800/40 border-slate-700/60 text-slate-400 hover:border-slate-600'
           }`}
         >
-          <div className="text-[10px] font-semibold text-slate-400">BCV Euro</div>
-          <div className="text-sm font-black text-indigo-400 mt-0.5">
+          <div className="text-[10px] font-medium text-slate-400">BCV Euro</div>
+          <div className="text-xs font-black text-indigo-400 font-numeric mt-0.5">
             Bs. {rates.bcvEur.toFixed(2)}
           </div>
         </button>
@@ -87,13 +91,13 @@ export function RatesWidget() {
             value={amountUsd}
             onChange={(e) => setAmountUsd(e.target.value)}
             placeholder="USD"
-            className="w-full pl-8 pr-3 py-1.5 rounded-lg bg-slate-800/80 border border-slate-700 text-xs font-bold text-white focus:outline-hidden focus:ring-1 focus:ring-blue-500"
+            className="w-full pl-8 pr-3 py-1 rounded-lg bg-slate-800/80 border border-slate-700 text-xs font-bold text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
           />
         </div>
 
         <div className="text-right shrink-0">
           <span className="text-[10px] text-slate-400 block font-medium">Equivalente estimado</span>
-          <span className="text-sm font-black text-white">
+          <span className="text-xs font-black text-white font-numeric">
             Bs. {calculatedVes.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </span>
         </div>

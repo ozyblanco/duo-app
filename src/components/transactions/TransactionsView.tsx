@@ -20,21 +20,14 @@ import {
 import type { Transaction } from '@/types';
 import { useCoupleProfiles } from '@/hooks/useCoupleProfiles';
 import { useCurrency } from '@/hooks/useCurrency';
+import { useCategories } from '@/hooks/useCategories';
 import { EditTransactionModal } from '@/components/modals/EditTransactionModal';
-import { mockCategories } from '@/data/mockData';
 
 interface TransactionsViewProps {
   transactions: Transaction[];
   onNewTransaction: () => void;
   onUpdateTransaction: (id: string, data: Partial<Omit<Transaction, 'id'>>) => Promise<boolean>;
   onDeleteTransaction: (id: string) => Promise<boolean>;
-}
-
-function getCategoryName(tx: Transaction) {
-  const catVal = tx.categoryId || tx.category;
-  if (!catVal) return 'General';
-  const cat = mockCategories.find((c) => c.id === catVal || c.name.toLowerCase() === catVal.toLowerCase());
-  return cat ? cat.name : catVal;
 }
 
 export function TransactionsView({ 
@@ -45,6 +38,7 @@ export function TransactionsView({
 }: TransactionsViewProps) {
   const { currentUser, partner } = useCoupleProfiles();
   const { formatAmount } = useCurrency();
+  const { categories } = useCategories();
 
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedPayer, setSelectedPayer] = useState<'all' | string>('all');
@@ -58,6 +52,13 @@ export function TransactionsView({
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [viewingReceiptUrl, setViewingReceiptUrl] = useState<string | null>(null);
 
+  const getCategoryName = (tx: Transaction) => {
+    const catVal = tx.categoryId || tx.category;
+    if (!catVal) return 'General';
+    const found = categories.find((c) => c.id === catVal || c.name.toLowerCase() === catVal.toLowerCase());
+    return found ? found.name : catVal;
+  };
+
   const filteredTransactions = useMemo(() => {
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
@@ -68,7 +69,7 @@ export function TransactionsView({
         const matchesSearch = tx.title.toLowerCase().includes(searchTerm.toLowerCase());
         const matchesPayer = selectedPayer === 'all' || tx.paidByUserId === selectedPayer;
         
-        const catName = getCategoryName(tx);
+        const catName = tx.categoryId || tx.category || 'General';
         const isSettlement = catName === 'Liquidación' || tx.category === 'Liquidación';
 
         const matchesCategory =
@@ -193,8 +194,8 @@ export function TransactionsView({
               className="w-full px-3 py-2 rounded-xl text-xs bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
             >
               <option value="all">Todas las categorías</option>
-              {mockCategories.map((cat) => (
-                <option key={cat.id} value={cat.id}>
+              {categories.map((cat) => (
+                <option key={cat.id} value={cat.name}>
                   {cat.name}
                 </option>
               ))}

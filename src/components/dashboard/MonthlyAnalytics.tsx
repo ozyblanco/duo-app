@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import { ChevronDown, TrendingUp, TrendingDown, PiggyBank, ShoppingBag } from 'lucide-react';
 import type { Transaction } from '@/types';
-import { mockCategories } from '@/data/mockData';
+import { useCategories } from '@/hooks/useCategories';
 import { useCurrency } from '@/hooks/useCurrency';
 
 interface MonthlyAnalyticsProps {
@@ -10,27 +10,22 @@ interface MonthlyAnalyticsProps {
 
 type PeriodFilter = 'this_month' | 'last_month' | 'all';
 
-const CATEGORY_COLORS: Record<string, { color: string; barColor: string }> = {
-  Comida: { color: 'bg-rose-500', barColor: '#F43F5E' },
-  Hogar: { color: 'bg-emerald-500', barColor: '#10B981' },
-  Servicios: { color: 'bg-amber-500', barColor: '#F59E0B' },
-  Entretenimiento: { color: 'bg-indigo-500', barColor: '#6366F1' },
-  Salud: { color: 'bg-teal-500', barColor: '#14B8A6' },
-  Transporte: { color: 'bg-sky-500', barColor: '#0EA5E9' },
-  General: { color: 'bg-purple-500', barColor: '#A855F7' },
-  Otros: { color: 'bg-slate-500', barColor: '#64748B' },
-};
-
-function getCategoryName(categoryId?: string) {
-  if (!categoryId) return 'Otros';
-  const cat = mockCategories.find((c) => c.id === categoryId);
-  return cat ? cat.name : categoryId;
-}
-
 export function MonthlyAnalytics({ transactions }: MonthlyAnalyticsProps) {
   const { formatAmount } = useCurrency();
+  const { categories } = useCategories();
   const [period, setPeriod] = useState<PeriodFilter>('this_month');
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+
+  const getCategoryDetails = (categoryId?: string) => {
+    if (!categoryId) return { name: 'General', color: '#8B5CF6' };
+    const found = categories.find(
+      (c) => c.id === categoryId || c.name.toLowerCase() === categoryId.toLowerCase()
+    );
+    return {
+      name: found ? found.name : categoryId,
+      color: found?.color || '#3B82F6',
+    };
+  };
 
   // 1. Filtrar transacciones según el período seleccionado
   const filteredExpenses = useMemo(() => {
@@ -91,29 +86,28 @@ export function MonthlyAnalytics({ transactions }: MonthlyAnalyticsProps) {
     };
   }, [totalExpenses]);
 
-  // 4. Desglose de Gastos por Categoría
+  // 4. Desglose de Gastos por Categoría Dinámica
   const categoryBreakdown = useMemo(() => {
-    const map = new Map<string, number>();
+    const map = new Map<string, { amount: number; color: string }>();
 
     filteredExpenses.forEach((tx) => {
-      const name = getCategoryName(tx.categoryId);
-      map.set(name, (map.get(name) || 0) + tx.amount);
+      const { name, color } = getCategoryDetails(tx.categoryId);
+      const prev = map.get(name) || { amount: 0, color };
+      map.set(name, { amount: prev.amount + tx.amount, color });
     });
 
     return Array.from(map.entries())
-      .map(([name, amount]) => {
-        const percentage = totalExpenses > 0 ? Math.round((amount / totalExpenses) * 100) : 0;
-        const styling = CATEGORY_COLORS[name] || CATEGORY_COLORS['Otros'];
+      .map(([name, data]) => {
+        const percentage = totalExpenses > 0 ? Math.round((data.amount / totalExpenses) * 100) : 0;
         return {
           name,
-          amount,
+          amount: data.amount,
           percentage,
-          color: styling.color,
-          barColor: styling.barColor,
+          color: data.color,
         };
       })
       .sort((a, b) => b.amount - a.amount);
-  }, [filteredExpenses, totalExpenses]);
+  }, [filteredExpenses, totalExpenses, categories]);
 
   // 5. Cálculo para el gráfico SVG de Dona
   const radius = 42;
@@ -284,7 +278,10 @@ export function MonthlyAnalytics({ transactions }: MonthlyAnalyticsProps) {
               <div key={cat.name} className="space-y-1.5">
                 <div className="flex items-center justify-between text-xs font-semibold">
                   <div className="flex items-center gap-2">
-                    <span className={`w-2.5 h-2.5 rounded-full ${cat.color}`} />
+                    <span
+                      className="w-2.5 h-2.5 rounded-full"
+                      style={{ backgroundColor: cat.color }}
+                    />
                     <span className="text-slate-700 dark:text-slate-300">{cat.name}</span>
                   </div>
                   <div className="flex items-center gap-3">
@@ -302,7 +299,7 @@ export function MonthlyAnalytics({ transactions }: MonthlyAnalyticsProps) {
                     className="h-full rounded-full transition-all duration-700"
                     style={{
                       width: `${cat.percentage}%`,
-                      backgroundColor: cat.barColor,
+                      backgroundColor: cat.color,
                     }}
                   />
                 </div>

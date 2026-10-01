@@ -1,14 +1,16 @@
 import { 
-  ShoppingBag, 
-  Wifi, 
-  UtensilsCrossed, 
   ArrowLeftRight, 
-  CreditCard,
   ChevronRight,
-  Receipt
+  Receipt,
+  Plus,
+  Tag,
+  Clock
 } from 'lucide-react';
 import type { Transaction } from '@/types';
 import { useCoupleProfiles } from '@/hooks/useCoupleProfiles';
+import { useCurrency } from '@/hooks/useCurrency';
+import { useCategories } from '@/hooks/useCategories';
+import { formatFriendlyDate } from '@/utils/formatters';
 
 interface TransactionListProps {
   transactions: Transaction[];
@@ -17,50 +19,51 @@ interface TransactionListProps {
 }
 
 export function TransactionList({ transactions, onViewAll, onNewTransaction }: TransactionListProps) {
-  // CORRECCIÓN: Se extrae 'partner' correctamente del hook
   const { currentUser, partner } = useCoupleProfiles();
+  const { formatAmount } = useCurrency();
+  const { categories } = useCategories();
 
-  const getCategoryIcon = (title: string) => {
-    const lower = title.toLowerCase();
-    if (lower.includes('transferencia') || lower.includes('liquidación')) {
-      return <ArrowLeftRight className="w-4 h-4 text-emerald-500" />;
-    }
-    if (lower.includes('supermercado') || lower.includes('comida') || lower.includes('mercado')) {
-      return <ShoppingBag className="w-4 h-4 text-rose-500" />;
-    }
-    if (lower.includes('internet') || lower.includes('luz') || lower.includes('servicio')) {
-      return <Wifi className="w-4 h-4 text-amber-500" />;
-    }
-    if (lower.includes('cena') || lower.includes('aniversario') || lower.includes('restaurante')) {
-      return <UtensilsCrossed className="w-4 h-4 text-indigo-500" />;
-    }
-    return <CreditCard className="w-4 h-4 text-blue-500" />;
+  const currentUserId = currentUser?.id;
+  const currentUserName = currentUser?.name ? currentUser.name.split(' ')[0] : 'Tú';
+  const partnerName = partner?.name ? partner.name.split(' ')[0] : 'Pareja';
+
+  const userInitial = currentUser?.name ? currentUser.name[0].toUpperCase() : 'U';
+  const partnerInitial = partner?.name ? partner.name[0].toUpperCase() : 'P';
+
+  const getCategoryDetails = (catIdOrName?: string) => {
+    if (!catIdOrName) return { name: 'General', color: '#3B82F6' };
+    const found = categories.find(
+      (c) => c.id === catIdOrName || c.name.toLowerCase() === catIdOrName.toLowerCase()
+    );
+    return {
+      name: found ? found.name : catIdOrName,
+      color: found?.color || '#3B82F6',
+    };
   };
 
-  const formatSplitRatio = (splitRatio?: { userA: number; userB: number } | string) => {
-    if (!splitRatio) return '50 / 50';
-    if (typeof splitRatio === 'string') return splitRatio;
-    return `${splitRatio.userA} / ${splitRatio.userB}`;
-  };
+  // Mostrar únicamente los últimos 5 movimientos en el Dashboard
+  const recentTransactions = transactions.slice(0, 5);
 
   if (transactions.length === 0) {
     return (
-      <div className="bg-white dark:bg-[#161B22] border border-slate-200/80 dark:border-slate-800/60 rounded-2xl p-6 lg:p-8 text-center shadow-xs">
-        <div className="w-12 h-12 mx-auto rounded-2xl bg-indigo-50 dark:bg-indigo-950/40 text-indigo-500 flex items-center justify-center mb-3">
+      <div className="bg-white dark:bg-[#161B22] border border-slate-200/80 dark:border-slate-800/60 rounded-2xl p-8 text-center shadow-xs">
+        <div className="w-12 h-12 mx-auto rounded-2xl bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center mb-3">
           <Receipt className="w-6 h-6" />
         </div>
         <h3 className="text-sm font-bold text-slate-900 dark:text-white mb-1">
-          Sin movimientos registrados
+          Aún no hay gastos registrados 🎉
         </h3>
-        <p className="text-xs text-slate-500 dark:text-slate-400 max-w-xs mx-auto leading-relaxed mb-4">
-          Aún no han registrado ningún gasto juntos. Registren el primero para comenzar a synchronizar sus finanzas.
+        <p className="text-xs text-slate-500 dark:text-slate-400 max-w-sm mx-auto leading-relaxed mb-4">
+          Comiencen a organizar sus finanzas registrando su primera compra o pago compartido.
         </p>
         {onNewTransaction && (
           <button
+            type="button"
             onClick={onNewTransaction}
-            className="py-2 px-4 rounded-xl text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 transition-all shadow-md shadow-indigo-600/20 cursor-pointer"
+            className="py-2.5 px-5 rounded-xl text-xs font-bold text-white bg-blue-600 hover:bg-blue-500 transition-all shadow-md shadow-blue-500/20 cursor-pointer inline-flex items-center gap-1.5 active:scale-95"
           >
-            Registrar Primer Gasto
+            <Plus className="w-4 h-4" />
+            <span>Registrar Primer Gasto</span>
           </button>
         )}
       </div>
@@ -70,56 +73,107 @@ export function TransactionList({ transactions, onViewAll, onNewTransaction }: T
   return (
     <div className="bg-white dark:bg-[#161B22] border border-slate-200/80 dark:border-slate-800/60 rounded-2xl p-5 lg:p-6 shadow-xs hover:border-slate-300 dark:hover:border-slate-700/80 transition-all">
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-base font-bold text-slate-900 dark:text-white tracking-tight">
-          Movimientos Recientes
-        </h2>
+        <div>
+          <h2 className="text-base font-bold text-slate-900 dark:text-white tracking-tight">
+            Movimientos Recientes
+          </h2>
+          <p className="text-[11px] text-slate-400">
+            Últimos registros de la pareja
+          </p>
+        </div>
         {onViewAll && (
           <button 
+            type="button"
             onClick={onViewAll}
-            className="text-xs font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 flex items-center gap-0.5 transition-colors cursor-pointer"
+            className="text-xs font-bold text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-0.5 cursor-pointer"
           >
-            <span>Ver todos</span>
+            <span>Ver historial completo</span>
             <ChevronRight className="w-3.5 h-3.5" />
           </button>
         )}
       </div>
 
       <div className="space-y-2.5">
-        {transactions.map((tx) => {
-          const displayAmount = Math.abs(tx.amount);
-          const isUser = tx.paidByUserId === currentUser?.id;
-          
-          // CORRECCIÓN: Se utiliza 'partner'
-          const paidByName = isUser 
-            ? (currentUser?.name || 'Tú') 
-            : (partner?.name || 'Pareja');
+        {recentTransactions.map((tx) => {
+          const isUser = tx.paidByUserId === currentUserId;
+          const payerName = isUser ? currentUserName : partnerName;
+          const payerInitial = isUser ? userInitial : partnerInitial;
+
+          const isSettlement = tx.categoryId === 'Liquidación' || tx.category === 'Liquidación';
+          const { name: categoryName, color: categoryColor } = getCategoryDetails(tx.categoryId || tx.category);
+
+          const friendlyDate = formatFriendlyDate(tx.createdAt || tx.date);
 
           return (
             <div
               key={tx.id}
-              className="flex items-center justify-between p-3.5 rounded-xl bg-slate-50/80 dark:bg-[#0B0F17]/40 border border-slate-200/50 dark:border-slate-800/40 hover:border-slate-300 dark:hover:border-slate-700/60 transition-all group"
+              className={`flex items-center justify-between p-3.5 rounded-xl border transition-all ${
+                isSettlement
+                  ? 'bg-emerald-500/5 border-emerald-500/30'
+                  : 'bg-slate-50/80 dark:bg-[#0B0F17]/50 border-slate-200/60 dark:border-slate-800/60 hover:border-slate-300 dark:hover:border-slate-700'
+              }`}
             >
               <div className="flex items-center gap-3.5 min-w-0">
-                <div className="p-2.5 rounded-xl bg-white dark:bg-[#161B22] border border-slate-200/60 dark:border-slate-800 text-slate-600 dark:text-slate-300 shrink-0 group-hover:scale-105 transition-transform shadow-2xs">
-                  {getCategoryIcon(tx.title)}
+                {/* Avatar del Pagador */}
+                <div 
+                  className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-white text-xs shrink-0 ${
+                    isSettlement 
+                      ? 'bg-emerald-500' 
+                      : isUser 
+                      ? 'bg-blue-600' 
+                      : 'bg-pink-500'
+                  }`}
+                  title={`Pagado por ${payerName}`}
+                >
+                  {isSettlement ? <ArrowLeftRight className="w-4 h-4" /> : payerInitial}
                 </div>
-                <div className="min-w-0">
-                  <h3 className="text-xs font-bold text-slate-900 dark:text-slate-100 truncate">
-                    {tx.title}
-                  </h3>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium mt-0.5">
-                    Pagado por <span className="font-semibold text-slate-700 dark:text-slate-300">{paidByName}</span>
-                  </p>
+
+                <div className="min-w-0 space-y-0.5">
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-xs font-bold text-slate-900 dark:text-white truncate">
+                      {tx.title}
+                    </h3>
+                    {tx.receiptUrl && (
+                      <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-500/10 px-1.5 py-0.5 rounded-md shrink-0 flex items-center gap-0.5">
+                        <Receipt className="w-2.5 h-2.5" />
+                        <span>Recibo</span>
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400 flex-wrap">
+                    <span className="font-semibold text-slate-700 dark:text-slate-300">
+                      {payerName}
+                    </span>
+                    <span>•</span>
+                    <span className="flex items-center gap-1 font-medium">
+                      <Tag className="w-3 h-3" style={{ color: categoryColor }} />
+                      <span style={{ color: categoryColor }}>{categoryName}</span>
+                    </span>
+                    <span>•</span>
+                    <span className="flex items-center gap-1 text-slate-400">
+                      <Clock className="w-3 h-3" />
+                      {friendlyDate}
+                    </span>
+                  </div>
                 </div>
               </div>
 
               <div className="text-right shrink-0">
-                <span className="text-xs font-bold font-numeric block text-slate-900 dark:text-white">
-                  -${displayAmount.toFixed(2)}
+                <span 
+                  className={`text-xs font-extrabold font-numeric block ${
+                    isSettlement
+                      ? 'text-emerald-600 dark:text-emerald-400'
+                      : 'text-slate-900 dark:text-white'
+                  }`}
+                >
+                  {isSettlement ? '+' : '-'}{formatAmount(tx.amount)}
                 </span>
-                <span className="text-[10px] font-medium text-slate-400 dark:text-slate-500 block mt-0.5">
-                  {formatSplitRatio(tx.splitRatio)}
-                </span>
+                {!isSettlement && (
+                  <span className="text-[10px] font-semibold text-slate-400 dark:text-slate-500 block mt-0.5">
+                    {tx.splitRatio?.userA ?? 50}/{tx.splitRatio?.userB ?? 50}
+                  </span>
+                )}
               </div>
             </div>
           );

@@ -72,12 +72,13 @@ export function useGoals() {
     };
   }, [fetchGoals]);
 
-  // Suscripción Realtime
+  // Suscripción Realtime con identificador único
   useEffect(() => {
-    if (!coupleId) return;
+    if (!coupleId || !navigator.onLine) return;
 
+    const channelName = `ch_goals_${coupleId}_${Math.random().toString(36).substring(2, 9)}`;
     const channel = supabase
-      .channel(`realtime-goals-${coupleId}`)
+      .channel(channelName)
       .on(
         'postgres_changes',
         {

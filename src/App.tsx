@@ -5,6 +5,7 @@ import { useAuth } from './hooks/useAuth';
 import { useTransactions } from './hooks/useTransactions';
 import { useCoupleProfiles } from './hooks/useCoupleProfiles';
 import { useAccounts } from './components/accounts/useAccounts';
+import { useGoals } from './hooks/useGoals';
 import { NotificationProvider } from './context/NotificationContext';
 import { CurrencyProvider } from './context/CurrencyContext';
 import { useNotifications } from './hooks/useNotifications';
@@ -12,6 +13,8 @@ import { AppLayout } from './components/layout/AppLayout';
 import { BalanceOverview } from './components/dashboard/BalanceOverview';
 import { MonthlyAnalytics } from './components/dashboard/MonthlyAnalytics';
 import { TransactionList } from './components/dashboard/TransactionList';
+import { OnboardingChecklist } from './components/dashboard/OnboardingChecklist';
+import { OnboardingWizard } from './components/onboarding/OnboardingWizard';
 import { NewTransactionModal } from './components/modals/NewTransactionModal';
 import { SettleUpModal } from './components/modals/SettleUpModal';
 import { MonthEndBanner } from './components/common/MonthEndBanner';
@@ -24,18 +27,21 @@ import { ProfileView } from './components/profile/ProfileView';
 import { SettingsView } from './components/settings/SettingsView';
 import { RatesWidget } from './components/currency/RatesWidget';
 import { AuthView } from './components/auth/AuthView';
-import { PartnerConnectView } from './components/auth/PartnerConnectView';
 import type { SplitRatio } from './types';
 
 function MainApp() {
   const { user, loading: authLoading } = useAuth();
   const { transactions, addTransaction, updateTransaction, deleteTransaction, refreshTransactions } = useTransactions();
   const { currentUser, partner, loading: profilesLoading } = useCoupleProfiles();
-  const { debitAccount } = useAccounts();
+  const { accounts, debitAccount } = useAccounts();
+  const { goals } = useGoals();
   const { addNotification } = useNotifications();
 
   const [isPartnerConnected, setIsPartnerConnected] = useState(false);
   const [checkingPartner, setCheckingPartner] = useState(true);
+
+  // Estados Onboarding
+  const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
 
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -66,6 +72,12 @@ function MainApp() {
           }
         } else {
           setIsPartnerConnected(false);
+        }
+
+        // Determinar si corresponde abrir el Onboarding
+        const isCompletedLocally = localStorage.getItem(`duo_onboarding_completed_${user.id}`);
+        if (!isCompletedLocally) {
+          setIsOnboardingOpen(true);
         }
       } catch (err: unknown) {
         console.error('Error consultando vínculo de pareja:', err);
@@ -149,6 +161,10 @@ function MainApp() {
     });
 
     if (success) {
+      if (data.accountId && data.amount > 0) {
+        await debitAccount(data.accountId, data.amount);
+      }
+
       const isMe = payerId === currentUserId;
       const payerName = isMe 
         ? (currentUser?.name ? currentUser.name.split(' ')[0] : 'Tú') 
@@ -214,21 +230,6 @@ function MainApp() {
     return <AuthView />;
   }
 
-  if (!isPartnerConnected) {
-    return (
-      <PartnerConnectView 
-        onComplete={() => {
-          setIsPartnerConnected(true);
-          addNotification({
-            title: '¡Pareja Vinculada con Éxito!',
-            message: 'Ahora ambos perfiles están sincronizados en tiempo real.',
-            type: 'system',
-          });
-        }} 
-      />
-    );
-  }
-
   return (
     <AppLayout 
       activeTab={activeTab} 
@@ -238,24 +239,43 @@ function MainApp() {
     >
       {activeTab === 'dashboard' && (
         <div className="space-y-6">
+          {/* Banner de fin de mes */}
           <MonthEndBanner 
             netBalance={netBalance} 
             onOpenSettleModal={() => setIsSettleModalOpen(true)} 
           />
 
+          {/* Checklist de Onboarding si quedan tareas */}
+          <OnboardingChecklist
+            isPartnerConnected={isPartnerConnected}
+            hasAccounts={accounts.length > 0}
+            hasGoals={goals.length > 0}
+            hasTransactions={transactions.length > 0}
+            onOpenNewTransaction={() => setIsModalOpen(true)}
+            onNavigateTab={setActiveTab}
+          />
+
+          {/* 1. Resumen Financiero y Deuda Mutua */}
           <BalanceOverview 
             totalJointSpent={totalJointSpent}
             userPaidTotal={userPaidTotal}
             partnerPaidTotal={partnerPaidTotal}
             netBalance={netBalance}
+            onOpenSettleModal={() => setIsSettleModalOpen(true)}
           />
-          <RatesWidget />
+
+          {/* 2. Movimientos Recientes */}
           <TransactionList 
             transactions={transactions} 
             onViewAll={() => setActiveTab('transactions')}
             onNewTransaction={() => setIsModalOpen(true)}
           />
+
+          {/* 3. Resumen del Mes y Ahorro */}
           <MonthlyAnalytics transactions={transactions} />
+
+          {/* 4. Tasas de Cambio (Referencia Secundaria) */}
+          <RatesWidget />
         </div>
       )}
 
@@ -278,17 +298,29 @@ function MainApp() {
 
       {activeTab === 'settings' && <SettingsView />}
 
+      {/* Modal Nuevo Gasto */}
       <NewTransactionModal 
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
         onSubmit={handleAddTransaction}
       />
 
+      {/* Modal Saldar Cuentas */}
       <SettleUpModal
         isOpen={isSettleModalOpen}
         onClose={() => setIsSettleModalOpen(false)}
         netBalance={netBalance}
         onSubmit={handleSettleUp}
+      />
+
+      {/* Asistente de Onboarding Inteligente */}
+      <OnboardingWizard
+        isOpen={isOnboardingOpen}
+        onClose={() => setIsOnboardingOpen(false)}
+        isPartnerConnected={isPartnerConnected}
+        hasAccounts={accounts.length > 0}
+        hasGoals={goals.length > 0}
+        onPartnerConnected={() => setIsPartnerConnected(true)}
       />
 
       <OfflineBanner onSyncRequest={refreshTransactions} />

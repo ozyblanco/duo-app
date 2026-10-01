@@ -5,8 +5,7 @@ import {
   DollarSign, 
   Users, 
   BarChart2, 
-  Award,
-  ShoppingBag,
+  Award, 
   CalendarDays,
   Download,
   FileSpreadsheet,
@@ -14,7 +13,7 @@ import {
   ChevronDown
 } from 'lucide-react';
 import type { Transaction } from '@/types';
-import { mockCategories } from '@/data/mockData';
+import { useCategories } from '@/hooks/useCategories';
 import { useCoupleProfiles } from '@/hooks/useCoupleProfiles';
 import { useCurrency } from '@/hooks/useCurrency';
 import { exportToCSV, exportToPDF } from '@/utils/exportReports';
@@ -23,20 +22,26 @@ interface AnalyticsViewProps {
   transactions: Transaction[];
 }
 
-function getCategoryName(categoryId?: string) {
-  if (!categoryId) return 'Otros';
-  const cat = mockCategories.find((c) => c.id === categoryId);
-  return cat ? cat.name : categoryId;
-}
-
 export function AnalyticsView({ transactions }: AnalyticsViewProps) {
   const { currentUser, partner } = useCoupleProfiles();
   const { formatAmount } = useCurrency();
+  const { categories } = useCategories();
   const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
 
   const currentUserId = currentUser?.id;
   const currentUserName = currentUser?.name ? currentUser.name.split(' ')[0] : 'Tú';
   const partnerName = partner?.name ? partner.name.split(' ')[0] : 'Pareja';
+
+  const getCategoryDetails = (categoryId?: string) => {
+    if (!categoryId) return { name: 'General', color: '#6366F1' };
+    const found = categories.find(
+      (c) => c.id === categoryId || c.name.toLowerCase() === categoryId.toLowerCase()
+    );
+    return {
+      name: found ? found.name : categoryId,
+      color: found?.color || '#6366F1',
+    };
+  };
 
   const expenseTransactions = useMemo(() => {
     return transactions.filter((tx) => {
@@ -60,16 +65,20 @@ export function AnalyticsView({ transactions }: AnalyticsViewProps) {
   const partnerTotal = Math.max(0, totalSpent - userTotal);
 
   const categoryStats = useMemo(() => {
-    const map = new Map<string, { categoryName: string; total: number; userPaid: number; partnerPaid: number; count: number }>();
+    const map = new Map<
+      string,
+      { categoryName: string; color: string; total: number; userPaid: number; partnerPaid: number; count: number }
+    >();
 
     expenseTransactions.forEach((tx) => {
       const catId = tx.categoryId || 'otros';
-      const categoryName = getCategoryName(tx.categoryId);
-      const existing = map.get(catId) || { categoryName, total: 0, userPaid: 0, partnerPaid: 0, count: 0 };
+      const { name: categoryName, color } = getCategoryDetails(tx.categoryId);
+      const existing = map.get(catId) || { categoryName, color, total: 0, userPaid: 0, partnerPaid: 0, count: 0 };
       const isUser = currentUserId ? tx.paidByUserId === currentUserId : true;
 
       map.set(catId, {
         categoryName,
+        color,
         total: existing.total + tx.amount,
         userPaid: existing.userPaid + (isUser ? tx.amount : 0),
         partnerPaid: existing.partnerPaid + (!isUser ? tx.amount : 0),
@@ -84,9 +93,9 @@ export function AnalyticsView({ transactions }: AnalyticsViewProps) {
         percentage: totalSpent > 0 ? Math.round((data.total / totalSpent) * 100) : 0,
       }))
       .sort((a, b) => b.total - a.total);
-  }, [expenseTransactions, totalSpent, currentUserId]);
+  }, [expenseTransactions, totalSpent, currentUserId, categories]);
 
-  const topCategory = categoryStats[0] || { categoryName: 'Ninguna', total: 0 };
+  const topCategory = categoryStats[0] || { categoryName: 'Ninguna', total: 0, color: '#6366F1' };
   const dailyAverage = (totalSpent / 30).toFixed(2);
 
   const userPercentage = totalSpent > 0 ? Math.round((userTotal / totalSpent) * 100) : 50;
@@ -251,7 +260,7 @@ export function AnalyticsView({ transactions }: AnalyticsViewProps) {
         </div>
       </div>
 
-      {/* Lista por Categoría */}
+      {/* Lista por Categoría Dinámica */}
       <div className="p-5 rounded-2xl bg-white dark:bg-[#161B22] border border-slate-200/80 dark:border-slate-800 space-y-4 shadow-xs">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
@@ -270,8 +279,11 @@ export function AnalyticsView({ transactions }: AnalyticsViewProps) {
             categoryStats.map((item) => (
               <div key={item.catId} className="space-y-1.5">
                 <div className="flex items-center justify-between text-xs font-semibold">
-                  <span className="text-slate-800 dark:text-slate-200 flex items-center gap-1.5 font-bold">
-                    <ShoppingBag className="w-3.5 h-3.5 text-slate-400" />
+                  <span className="text-slate-800 dark:text-slate-200 flex items-center gap-2 font-bold">
+                    <span 
+                      className="w-2.5 h-2.5 rounded-full shrink-0" 
+                      style={{ backgroundColor: item.color }} 
+                    />
                     {item.categoryName}
                   </span>
                   <div className="flex items-center gap-2">
@@ -284,8 +296,11 @@ export function AnalyticsView({ transactions }: AnalyticsViewProps) {
 
                 <div className="h-2 w-full bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
                   <div 
-                    className="h-full bg-indigo-500 dark:bg-indigo-400 rounded-full transition-all duration-500"
-                    style={{ width: `${item.percentage}%` }}
+                    className="h-full rounded-full transition-all duration-500"
+                    style={{ 
+                      width: `${item.percentage}%`,
+                      backgroundColor: item.color
+                    }}
                   />
                 </div>
 
